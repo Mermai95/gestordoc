@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { generarSUENLACE } from '../lib/generarSUENLACE'
+import SubirFacturas from '../components/SubirFacturas'
 
 export default function Facturas() {
   const { clienteId } = useParams()
   const navigate      = useNavigate()
 
-  const [cliente,  setCliente]  = useState(null)
-  const [facturas, setFacturas] = useState([])
-  const [loading,  setLoading]  = useState(true)
+  const [cliente,       setCliente]       = useState(null)
+  const [facturas,      setFacturas]      = useState([])
+  const [loading,       setLoading]       = useState(true)
+  const [mostrarSubida, setMostrarSubida] = useState(false)
 
   useEffect(() => {
     fetchCliente()
@@ -16,23 +19,37 @@ export default function Facturas() {
   }, [clienteId])
 
   async function fetchCliente() {
-    const { data } = await supabase
-      .from('clientes')
-      .select('*')
-      .eq('id', clienteId)
-      .single()
+    const { data } = await supabase.from('clientes').select('*').eq('id', clienteId).single()
     setCliente(data)
   }
 
   async function fetchFacturas() {
     setLoading(true)
-    const { data } = await supabase
-      .from('facturas')
-      .select('*')
-      .eq('cliente_id', clienteId)
-      .order('fecha_expedicion', { ascending: false })
+    const { data } = await supabase.from('facturas').select('*').eq('cliente_id', clienteId).order('fecha_expedicion', { ascending: false })
     setFacturas(data ?? [])
     setLoading(false)
+  }
+
+  function handleFacturasGuardadas() {
+    setMostrarSubida(false)
+    fetchFacturas()
+  }
+
+  function handleExportar() {
+    if (!facturas.length) return
+    generarSUENLACE({
+      facturas: facturas.map(f => ({
+        num_factura: f.num_factura, fecha_expedicion: f.fecha_expedicion,
+        fecha_operacion: f.fecha_operacion, concepto: f.concepto,
+        nif_expedidor: f.nif_expedidor, expedidor: f.expedidor,
+        base_imponible: f.base_imponible, pct_iva: f.pct_iva,
+        cuota: f.cuota_iva, deducible: f.deducible, lineas_extra: f.lineas_extra || [],
+      })),
+      nombreEmpresa: cliente?.nombre ?? '',
+      codigoEmpresa: '00001',
+      
+      
+    })
   }
 
   if (!cliente) return <p style={{ color: '#6B6B6B' }}>Cargando…</p>
@@ -43,66 +60,64 @@ export default function Facturas() {
 
   return (
     <div>
-      {/* Breadcrumb */}
-      <div style={styles.breadcrumb}>
-        <span onClick={() => navigate('/clientes')} style={styles.breadLink}>Clientes</span>
-        <span style={styles.breadSep}>/</span>
-        <span style={styles.breadCurrent}>{cliente.nombre}</span>
+      <div style={s.breadcrumb}>
+        <span onClick={() => navigate('/clientes')} style={s.breadLink}>Clientes</span>
+        <span style={s.breadSep}>/</span>
+        <span style={s.breadCurrent}>{cliente.nombre}</span>
       </div>
 
-      {/* Header */}
-      <div style={styles.header}>
+      <div style={s.header}>
         <div>
-          <h1 style={styles.title}>{cliente.nombre}</h1>
-          <span style={styles.nif}>{cliente.nif_cif}</span>
+          <h1 style={s.title}>{cliente.nombre}</h1>
+          <span style={s.nif}>{cliente.nif_cif}</span>
         </div>
-        <div style={styles.headerActions}>
-          <button style={styles.btnSecondary} disabled>
-            ⬇ Exportar A3
+        <div style={s.headerActions}>
+          <button onClick={handleExportar} disabled={validadas.length === 0} style={{ ...s.btnSecondary, opacity: validadas.length === 0 ? 0.4 : 1 }}>
+            ⬇ Exportar SUENLACE.DAT ({validadas.length})
           </button>
-          <button style={styles.btnPrimary}>
-            + Subir facturas
+          <button onClick={() => setMostrarSubida(v => !v)} style={s.btnPrimary}>
+            {mostrarSubida ? '✕ Cerrar' : '+ Subir facturas'}
           </button>
         </div>
       </div>
 
-      {/* Stats */}
-      <div style={styles.statsRow}>
+      <div style={s.statsRow}>
         <Stat label="Validadas"  value={validadas.length}  color="#2E7D32" />
         <Stat label="Pendientes" value={pendientes.length} color="#F57F17" />
         <Stat label="Con error"  value={errores.length}    color="#E65100" />
         <Stat label="Total"      value={facturas.length}   color="#1C1C1C" />
       </div>
 
-      {/* Tabla / empty state */}
+      {mostrarSubida && (
+        <div style={s.subidaPanel}>
+          <SubirFacturas clienteId={clienteId} onFacturasGuardadas={handleFacturasGuardadas} />
+        </div>
+      )}
+
       {loading ? (
         <p style={{ color: '#6B6B6B', fontSize: '0.9rem' }}>Cargando facturas…</p>
       ) : facturas.length === 0 ? (
-        <div style={styles.empty}>
+        <div style={s.empty}>
           <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>🗂️</div>
-          <p style={styles.emptyTitle}>Sin facturas todavía</p>
-          <p style={styles.emptySub}>Sube imágenes o PDFs para empezar</p>
+          <p style={s.emptyTitle}>Sin facturas todavía</p>
+          <p style={s.emptySub}>Pulsa "+ Subir facturas" para empezar</p>
         </div>
       ) : (
-        <div style={styles.tableWrap}>
-          <table style={styles.table}>
+        <div style={s.tableWrap}>
+          <table style={s.table}>
             <thead>
-              <tr>
-                {['Nº Factura','Expedidor','Fecha','Base Imp.','% IVA','Cuota','Estado'].map(h => (
-                  <th key={h} style={styles.th}>{h}</th>
-                ))}
-              </tr>
+              <tr>{['Nº Factura','Expedidor','Fecha','Base Imp.','% IVA','Cuota','Estado'].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {facturas.map(f => (
-                <tr key={f.id} style={styles.tr}>
-                  <td style={{...styles.td, fontFamily: 'monospace', fontSize: '0.8rem'}}>{f.num_factura || '—'}</td>
-                  <td style={styles.td}>{f.expedidor || '—'}</td>
-                  <td style={{...styles.td, fontSize: '0.82rem'}}>{f.fecha_expedicion ? new Date(f.fecha_expedicion).toLocaleDateString('es-ES') : '—'}</td>
-                  <td style={{...styles.td, textAlign: 'right'}}>{f.base_imponible != null ? `${Number(f.base_imponible).toFixed(2)} €` : '—'}</td>
-                  <td style={{...styles.td, textAlign: 'right'}}>{f.pct_iva ? `${f.pct_iva}%` : '—'}</td>
-                  <td style={{...styles.td, textAlign: 'right'}}>{f.cuota_iva != null ? `${Number(f.cuota_iva).toFixed(2)} €` : '—'}</td>
-                  <td style={styles.td}><EstadoBadge estado={f.estado} /></td>
+                <tr key={f.id}>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '0.8rem' }}>{f.num_factura || '—'}</td>
+                  <td style={s.td}>{f.expedidor || '—'}</td>
+                  <td style={{ ...s.td, fontSize: '0.82rem' }}>{f.fecha_expedicion ? new Date(f.fecha_expedicion).toLocaleDateString('es-ES') : '—'}</td>
+                  <td style={{ ...s.td, textAlign: 'right' }}>{f.base_imponible != null ? `${Number(f.base_imponible).toFixed(2)} €` : '—'}</td>
+                  <td style={{ ...s.td, textAlign: 'right' }}>{f.pct_iva ? `${f.pct_iva}%` : '—'}</td>
+                  <td style={{ ...s.td, textAlign: 'right' }}>{f.cuota_iva != null ? `${Number(f.cuota_iva).toFixed(2)} €` : '—'}</td>
+                  <td style={s.td}><EstadoBadge estado={f.estado} /></td>
                 </tr>
               ))}
             </tbody>
@@ -128,15 +143,11 @@ function EstadoBadge({ estado }) {
     pendiente: { bg: '#FFF8E1', color: '#F57F17', label: '· Pendiente' },
     error:     { bg: '#FFF3E0', color: '#E65100', label: '✗ Error'     },
   }
-  const s = map[estado] || map.pendiente
-  return (
-    <span style={{ background: s.bg, color: s.color, padding: '3px 9px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 600 }}>
-      {s.label}
-    </span>
-  )
+  const st = map[estado] || map.pendiente
+  return <span style={{ background: st.bg, color: st.color, padding: '3px 9px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 600 }}>{st.label}</span>
 }
 
-const styles = {
+const s = {
   breadcrumb:    { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', fontSize: '0.82rem' },
   breadLink:     { color: '#1A472A', cursor: 'pointer', fontWeight: 600 },
   breadSep:      { color: '#D8D4CB' },
@@ -146,8 +157,9 @@ const styles = {
   nif:           { fontSize: '0.8rem', color: '#6B6B6B', fontFamily: 'monospace' },
   headerActions: { display: 'flex', gap: '10px' },
   btnPrimary:    { background: '#1A472A', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
-  btnSecondary:  { background: '#fff', color: '#1C1C1C', border: '1px solid #D8D4CB', borderRadius: '8px', padding: '10px 18px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', opacity: 0.5 },
+  btnSecondary:  { background: '#fff', color: '#1C1C1C', border: '1px solid #D8D4CB', borderRadius: '8px', padding: '10px 18px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
   statsRow:      { display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' },
+  subidaPanel:   { background: '#F5F3EE', border: '1px solid #D8D4CB', borderRadius: '10px', padding: '24px', marginBottom: '28px' },
   empty:         { textAlign: 'center', padding: '60px 24px', color: '#6B6B6B' },
   emptyTitle:    { fontWeight: 700, fontSize: '1rem', color: '#1C1C1C', marginBottom: '6px' },
   emptySub:      { fontSize: '0.85rem' },
@@ -155,5 +167,4 @@ const styles = {
   table:         { width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' },
   th:            { padding: '10px 14px', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: '#6B6B6B', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#F5F3EE', borderBottom: '1px solid #D8D4CB' },
   td:            { padding: '12px 14px', borderBottom: '1px solid #EDEAE3', color: '#1C1C1C' },
-  tr:            {},
 }
