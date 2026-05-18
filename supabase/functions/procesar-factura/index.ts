@@ -5,24 +5,35 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const PROMPT = `Eres un experto en lectura de facturas españolas para gestorías contables.
+const PROMPT = `Eres un experto contable español especializado en lectura de facturas para gestorías.
+Tu tarea es extraer datos fiscales con máxima precisión.
 
-Extrae los datos y responde SOLO con JSON, sin texto adicional ni backticks.
+INSTRUCCIONES CRÍTICAS:
+1. Lee TODOS los tipos de IVA que aparezcan en la factura — nunca asumas solo 21%.
+2. Los tipos válidos en España son: 0%, 4%, 5%, 10%, 21%. Léelos directamente del documento.
+3. Si hay MÚLTIPLES tipos de IVA, crea una línea por cada tipo.
+4. La línea principal es la de mayor base imponible. El resto van en lineas_extra.
+5. Si es ABONO o RECTIFICATIVA (importes negativos, dice "abono", "nota de crédito", "rectificativa"), pon tipo "abono" e importes en negativo.
+6. El campo "deducible" = igual que "cuota_iva" salvo que indique explícitamente que no es deducible.
+7. Si la página está en blanco o no es una factura, responde: {"es_factura": false}
 
-REGLAS IMPORTANTES:
-1. Si la factura tiene MÚLTIPLES tipos de IVA (ej: productos al 21%, otros al 10%, otros al 4% o 0%), crea una línea principal con el importe mayor y el resto en lineas_extra. NUNCA mezcles importes de distintos IVAs en una sola línea.
-2. Los tipos de IVA en España son: 21%, 10%, 5%, 4%, 0%. Léelos directamente de la factura, no asumas siempre 21%.
-3. Si es una factura RECTIFICATIVA o ABONO (importe negativo, pone "abono", "rectificativa", "nota de crédito"), pon los importes en NEGATIVO y tipo "abono".
-4. El campo "deducible" es igual a "cuota_iva" salvo que la factura indique explícitamente que no es deducible.
-5. Si la página no contiene una factura (está en blanco o es portada), responde exactamente: {"es_factura": false}
+FORMATOS ESPECIALES DE IVA:
+- Makro usa códigos: 1=10%, 2=21%, 3=21%, 5=4% — tradúcelos al porcentaje real.
+- Algunas facturas ponen "IVA Reducido", "IVA Superreducido" — tradúcelos a 10% y 4%.
+- Si ves "Exento" o "Exenta" → 0%.
+- Si ves "RE" o "Recargo de equivalencia" → es un tipo separado, inclúyelo en lineas_extra.
 
-FORMATO DE RESPUESTA:
+NÚMERO DE FACTURA:
+- Cópialo exactamente como aparece, con guiones, barras y letras.
+- Si no aparece claramente, pon lo más parecido que veas.
+
+RESPONDE SOLO CON ESTE JSON (sin texto, sin backticks):
 {
-  "num_factura": "número exacto de la factura",
+  "num_factura": "número exacto",
   "fecha_expedicion": "DD/MM/YYYY",
-  "fecha_operacion": "DD/MM/YYYY o vacío si no aparece",
-  "concepto": "descripción breve del proveedor y tipo de compra",
-  "nif_expedidor": "NIF o CIF del emisor",
+  "fecha_operacion": "DD/MM/YYYY o vacío",
+  "concepto": "Su fra. nº [num_factura] — [nombre expedidor corto]",
+  "nif_expedidor": "NIF o CIF sin espacios",
   "expedidor": "nombre completo del emisor",
   "tipo": "factura o abono",
   "base_imponible": 0.00,
@@ -30,38 +41,45 @@ FORMATO DE RESPUESTA:
   "cuota_iva": 0.00,
   "deducible": 0.00,
   "confianza": "alta|media|baja",
-  "notas": "cualquier observación relevante o vacío",
-  "lineas_extra": []
+  "notas": "observaciones relevantes o vacío",
+  "lineas_extra": [
+    { "base_imponible": 0.00, "pct_iva": "10,0", "cuota_iva": 0.00, "deducible": 0.00 }
+  ]
 }
 
-lineas_extra — una entrada por cada tipo de IVA adicional:
-[
-  { "base_imponible": 0.00, "pct_iva": "10,0", "cuota_iva": 0.00, "deducible": 0.00 },
-  { "base_imponible": 0.00, "pct_iva": "4,0",  "cuota_iva": 0.00, "deducible": 0.00 },
-  { "base_imponible": 0.00, "pct_iva": "0",     "cuota_iva": 0.00, "deducible": 0.00 }
-]
-
-CASO ESPECIAL — Makro y facturas con códigos de IVA:
-Algunas facturas (especialmente Makro) usan códigos numéricos para el IVA:
-  "1=10,00%"  significa IVA al 10%
-  "2=21,00%"  significa IVA al 21%
-  "3=21,00%"  significa IVA al 21% (recargo)
-  "5=4,00%"   significa IVA al 4%
-En estos casos, lee cada línea por separado y crea una entrada por cada código.
-
-EJEMPLO Makro con formato "Mercancía % IMP Total Imp.":
-  8,24   1=10,00%   0,82   → base 8.24,  pct_iva "10,0", cuota 0.82
-  214,16 2=21,00%  44,97   → base 214.16, pct_iva "21,0", cuota 44.97  ← línea principal
-  1,49   5=4,00%    0,06   → base 1.49,  pct_iva "4,0",  cuota 0.06
-
-Resultado esperado:
-- Línea principal: base 214.16, pct_iva "21,0", cuota 44.97
-- lineas_extra: [
-    { base_imponible: 8.24,  pct_iva: "10,0", cuota_iva: 0.82, deducible: 0.82 },
-    { base_imponible: 1.49,  pct_iva: "4,0",  cuota_iva: 0.06, deducible: 0.06 }
+EJEMPLO REAL — Makro con 3 tipos de IVA:
+Factura muestra: "8,24 1=10,00% 0,82 / 214,16 2=21,00% 44,97 / 1,49 5=4,00% 0,06"
+Resultado:
+{
+  "num_factura": "2500002982",
+  "fecha_expedicion": "01/01/2025",
+  "concepto": "Su fra. nº 2500002982 — MAKRO",
+  "nif_expedidor": "A28206493",
+  "expedidor": "MAKRO AUTOSERVICIO MAYORISTA SA",
+  "tipo": "factura",
+  "base_imponible": 214.16,
+  "pct_iva": "21,0",
+  "cuota_iva": 44.97,
+  "deducible": 44.97,
+  "confianza": "alta",
+  "notas": "",
+  "lineas_extra": [
+    { "base_imponible": 8.24,  "pct_iva": "10,0", "cuota_iva": 0.82, "deducible": 0.82 },
+    { "base_imponible": 1.49,  "pct_iva": "4,0",  "cuota_iva": 0.06, "deducible": 0.06 }
   ]
+}
 
-Responde SOLO con el JSON.`
+EJEMPLO — Factura abono/rectificativa:
+{
+  "num_factura": "AB-2025-001",
+  "tipo": "abono",
+  "base_imponible": -150.00,
+  "pct_iva": "21,0",
+  "cuota_iva": -31.50,
+  "deducible": -31.50,
+  "confianza": "alta",
+  "lineas_extra": []
+}`
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -104,7 +122,7 @@ serve(async (req) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-opus-4-5',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 1500,
         messages: [{
           role: 'user',
