@@ -188,15 +188,19 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
 
       {/* IZQUIERDA — lista */}
       <div style={s.leftCol}>
-        {/* Mini drop zone siempre visible */}
+        {/* Drop zone siempre visible */}
         <div
-          style={{ ...s.miniDrop, ...(dragOver ? s.miniDropActive : {}) }}
+          style={{ ...s.dropZoneLeft, ...(dragOver ? s.dropZoneLeftActive : {}) }}
           onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
           onClick={() => fileInputRef.current.click()}
         >
           <input ref={fileInputRef} type="file" accept="image/*,.pdf" multiple style={{ display: 'none' }} onChange={onFileChange} />
-          <span style={s.miniDropIcon}>📄</span>
-          <span style={s.miniDropText}>Arrastra o haz clic para subir facturas</span>
+          <div style={s.dropZoneLeftIcon}>📄</div>
+          <p style={s.dropZoneLeftTitle}>Arrastra facturas aquí</p>
+          <p style={s.dropZoneLeftSub}>PDF, JPG, PNG</p>
+          <button style={s.dropZoneLeftBtn} onClick={e => { e.stopPropagation(); fileInputRef.current.click() }}>
+            Seleccionar archivos
+          </button>
         </div>
         <div style={s.leftHeader}>
           <span style={s.leftTitle}>
@@ -441,10 +445,12 @@ const NAV_H = 56 // altura del navbar en px
 const s = {
   // Drop zone
   dropWrap:    { border: '2px dashed #D8D4CB', borderRadius: '10px', background: '#fff', padding: '60px 24px', textAlign: 'center', cursor: 'pointer' },
-  miniDrop:    { padding: '10px 14px', borderBottom: '1px solid #D8D4CB', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', background: '#fff', flexShrink: 0, transition: 'background 0.15s', borderRadius: '8px 8px 0 0' },
-  miniDropActive: { background: '#E8F5E9' },
-  miniDropIcon:{ fontSize: '1rem' },
-  miniDropText:{ fontSize: '0.74rem', color: '#6B6B6B', fontWeight: 500 },
+  dropZoneLeft:       { padding: '16px 12px', borderBottom: '1px solid #D8D4CB', textAlign: 'center', cursor: 'pointer', background: '#fff', flexShrink: 0, transition: 'background 0.15s' },
+  dropZoneLeftActive: { background: '#E8F5E9', borderColor: '#1A472A' },
+  dropZoneLeftIcon:   { fontSize: '1.6rem', marginBottom: '4px' },
+  dropZoneLeftTitle:  { fontSize: '0.78rem', fontWeight: 700, color: '#1C1C1C', marginBottom: '2px' },
+  dropZoneLeftSub:    { fontSize: '0.7rem', color: '#6B6B6B', marginBottom: '8px' },
+  dropZoneLeftBtn:    { background: '#1A472A', color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 14px', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' },
   dropIcon:    { fontSize: '3rem', marginBottom: '12px' },
   dropTitle:   { fontWeight: 700, fontSize: '1.1rem', marginBottom: '8px' },
   dropSub:     { fontSize: '0.85rem', color: '#6B6B6B', marginBottom: '18px' },
@@ -499,7 +505,7 @@ const s = {
   // Columna central — visor
   centerCol:   { display: 'flex', flexDirection: 'column', background: '#1E1E1E', overflow: 'hidden', borderRadius: '8px' },
   visorFrame:  { width: '100%', height: '100%', border: 'none', display: 'block' },
-  visorImgWrap:{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', padding: '24px', alignItems: 'flex-start', position: 'relative', background: '#1E1E1E' },
+  visorImgWrap:{ flex: 1, overflowY: 'auto', overflowX: 'hidden', display: 'flex', justifyContent: 'center', padding: '24px', alignItems: 'flex-start', position: 'relative', background: '#1E1E1E' },
   visorImg:    { width: '88%', boxShadow: '0 4px 24px rgba(0,0,0,0.7)', borderRadius: '2px' },
   visorEmpty:  { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6B6B6B', gap: '10px' },
 
