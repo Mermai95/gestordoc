@@ -41,11 +41,24 @@ lineas_extra — una entrada por cada tipo de IVA adicional:
   { "base_imponible": 0.00, "pct_iva": "0",     "cuota_iva": 0.00, "deducible": 0.00 }
 ]
 
-EJEMPLO Makro con 3 tipos de IVA:
-- Línea principal: base 150.00, pct_iva "21,0", cuota 31.50
+CASO ESPECIAL — Makro y facturas con códigos de IVA:
+Algunas facturas (especialmente Makro) usan códigos numéricos para el IVA:
+  "1=10,00%"  significa IVA al 10%
+  "2=21,00%"  significa IVA al 21%
+  "3=21,00%"  significa IVA al 21% (recargo)
+  "5=4,00%"   significa IVA al 4%
+En estos casos, lee cada línea por separado y crea una entrada por cada código.
+
+EJEMPLO Makro con formato "Mercancía % IMP Total Imp.":
+  8,24   1=10,00%   0,82   → base 8.24,  pct_iva "10,0", cuota 0.82
+  214,16 2=21,00%  44,97   → base 214.16, pct_iva "21,0", cuota 44.97  ← línea principal
+  1,49   5=4,00%    0,06   → base 1.49,  pct_iva "4,0",  cuota 0.06
+
+Resultado esperado:
+- Línea principal: base 214.16, pct_iva "21,0", cuota 44.97
 - lineas_extra: [
-    { base_imponible: 80.00, pct_iva: "10,0", cuota_iva: 8.00, deducible: 8.00 },
-    { base_imponible: 20.00, pct_iva: "4,0",  cuota_iva: 0.80, deducible: 0.80 }
+    { base_imponible: 8.24,  pct_iva: "10,0", cuota_iva: 0.82, deducible: 0.82 },
+    { base_imponible: 1.49,  pct_iva: "4,0",  cuota_iva: 0.06, deducible: 0.06 }
   ]
 
 Responde SOLO con el JSON.`

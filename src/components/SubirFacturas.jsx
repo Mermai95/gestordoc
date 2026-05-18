@@ -127,6 +127,25 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
     }))
   }
 
+  function editarLineaExtra(id, idx, campo, valor) {
+    setFilas(f => f.map(fila => {
+      if (fila.id !== id) return fila
+      const lineas = [...(fila.datos.lineas_extra || [])]
+      lineas[idx] = { ...lineas[idx], [campo]: valor }
+
+      // Recalcular cuota si cambia base o pct_iva de la línea
+      if (campo === 'base_imponible' || campo === 'pct_iva') {
+        const base = parseFloat(campo === 'base_imponible' ? valor : lineas[idx].base_imponible) || 0
+        const pct  = parseFloat((campo === 'pct_iva' ? valor : lineas[idx].pct_iva)?.toString().replace(',', '.')) || 0
+        const cuota = Math.round(base * pct / 100 * 100) / 100
+        lineas[idx].cuota_iva = cuota.toFixed(2)
+        lineas[idx].deducible = cuota.toFixed(2)
+      }
+
+      return { ...fila, datos: { ...fila.datos, lineas_extra: lineas } }
+    }))
+  }
+
   function setEstadoFila(id, estado) {
     setFilas(f => f.map(fila => fila.id === id ? { ...fila, estado } : fila))
   }
@@ -235,6 +254,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
               <FilaFactura
                 key={fila.id} fila={fila}
                 onChange={(campo, valor) => editarCampo(fila.id, campo, valor)}
+                onChangeLinea={(idx, campo, valor) => editarLineaExtra(fila.id, idx, campo, valor)}
                 onValidar={() => setEstadoFila(fila.id, 'validada')}
                 onError={()   => setEstadoFila(fila.id, 'error')}
               />
@@ -246,8 +266,15 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
   )
 }
 
-function FilaFactura({ fila, onChange, onValidar, onError }) {
+function FilaFactura({ fila, onChange, onChangeLinea, onValidar, onError }) {
   const { datos, nombre, estado, archivo } = fila
+  
+  // Truncar número de factura a últimos 10 chars si es necesario
+  const numFacturaMostrado = datos.num_factura || ''
+  const numFacturaA3 = numFacturaMostrado.length > 10 
+    ? numFacturaMostrado.slice(-10) 
+    : numFacturaMostrado
+  const numTruncado = numFacturaMostrado.length > 10
   const [preview, setPreview] = useState(null)
 
   if (!datos) return (
@@ -269,7 +296,11 @@ function FilaFactura({ fila, onChange, onValidar, onError }) {
           {datos.notas && <span style={s.filaNota} title={datos.notas}>⚠ nota</span>}
         </div>
         <div style={s.filaGrid}>
-          <Campo label="Nº Factura"  value={datos.num_factura}      onChange={v => onChange('num_factura', v)}    mono />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            <label style={s.campoLabel}>Nº Factura {numTruncado && <span style={{ color: '#E65100', fontWeight: 700 }}>→ A3: {numFacturaA3}</span>}</label>
+            <input type="text" value={numFacturaMostrado} onChange={e => onChange('num_factura', e.target.value)}
+              style={{ ...s.campoInput, fontFamily: 'monospace', fontSize: '0.8rem', ...(numTruncado ? { borderColor: '#FFCC80' } : {}) }} />
+          </div>
           <Campo label="Expedidor"   value={datos.expedidor}        onChange={v => onChange('expedidor', v)}      wide />
           <Campo label="NIF / CIF"   value={datos.nif_expedidor}    onChange={v => onChange('nif_expedidor', v)}  mono />
           <Campo label="Fecha"       value={datos.fecha_expedicion} onChange={v => onChange('fecha_expedicion', v)} small />
@@ -280,16 +311,33 @@ function FilaFactura({ fila, onChange, onValidar, onError }) {
           <Campo label="Deducible"   value={datos.deducible}        onChange={v => onChange('deducible', v)}      small right />
           <Campo label="Total"       value={total}                  onChange={() => {}}                           small right />
         </div>
-        {/* Líneas extra de IVA */}
+        {/* Líneas extra de IVA — editables */}
         {datos.lineas_extra?.length > 0 && (
           <div style={s.lineasExtra}>
             <p style={s.lineasLabel}>Líneas adicionales de IVA</p>
             {datos.lineas_extra.map((linea, idx) => (
-              <div key={idx} style={s.lineaRow}>
+              <div key={idx} style={s.lineaRowEdit}>
                 <span style={s.lineaTag}>IVA {linea.pct_iva}%</span>
-                <span style={s.lineaDato}>Base: {linea.base_imponible} €</span>
-                <span style={s.lineaDato}>Cuota: {linea.cuota_iva} €</span>
-                <span style={s.lineaDato}>Deducible: {linea.deducible} €</span>
+                <div style={s.lineaInputGroup}>
+                  <label style={s.campoLabel}>Base</label>
+                  <input type="text" value={linea.base_imponible ?? ''} onChange={e => onChangeLinea(idx, 'base_imponible', e.target.value)}
+                    style={{ ...s.campoInput, width: '90px', textAlign: 'right' }} />
+                </div>
+                <div style={s.lineaInputGroup}>
+                  <label style={s.campoLabel}>% IVA</label>
+                  <input type="text" value={linea.pct_iva ?? ''} onChange={e => onChangeLinea(idx, 'pct_iva', e.target.value)}
+                    style={{ ...s.campoInput, width: '60px', textAlign: 'right' }} />
+                </div>
+                <div style={s.lineaInputGroup}>
+                  <label style={s.campoLabel}>Cuota</label>
+                  <input type="text" value={linea.cuota_iva ?? ''} onChange={e => onChangeLinea(idx, 'cuota_iva', e.target.value)}
+                    style={{ ...s.campoInput, width: '90px', textAlign: 'right' }} />
+                </div>
+                <div style={s.lineaInputGroup}>
+                  <label style={s.campoLabel}>Deducible</label>
+                  <input type="text" value={linea.deducible ?? ''} onChange={e => onChangeLinea(idx, 'deducible', e.target.value)}
+                    style={{ ...s.campoInput, width: '90px', textAlign: 'right' }} />
+                </div>
               </div>
             ))}
           </div>
@@ -389,10 +437,10 @@ const s = {
   previewClose:  { background: 'transparent', border: 'none', fontSize: '0.85rem', cursor: 'pointer', color: '#6B6B6B', fontWeight: 600 },
   previewFrame:  { width: '100%', flex: 1, border: 'none', minHeight: '70vh' },
   previewImg:    { width: '100%', maxHeight: '75vh', objectFit: 'contain', padding: '16px' },
-  lineasExtra:   { background: '#F5F3EE', border: '1px solid #D8D4CB', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px' },
-  lineasLabel:   { fontSize: '0.72rem', fontWeight: 600, color: '#6B6B6B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' },
-  lineaRow:      { display: 'flex', gap: '16px', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid #EDEAE3', fontSize: '0.82rem' },
-  lineaTag:      { background: '#1A472A', color: '#fff', borderRadius: '4px', padding: '2px 8px', fontSize: '0.72rem', fontWeight: 700, flexShrink: 0 },
-  lineaDato:     { color: '#1C1C1C' },
+  lineasExtra:    { background: '#F5F3EE', border: '1px solid #D8D4CB', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px' },
+  lineasLabel:    { fontSize: '0.72rem', fontWeight: 600, color: '#6B6B6B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' },
+  lineaRowEdit:   { display: 'flex', gap: '10px', alignItems: 'flex-end', padding: '6px 0', borderBottom: '1px solid #EDEAE3' },
+  lineaTag:       { background: '#1A472A', color: '#fff', borderRadius: '4px', padding: '2px 8px', fontSize: '0.72rem', fontWeight: 700, flexShrink: 0, marginBottom: '6px' },
+  lineaInputGroup:{ display: 'flex', flexDirection: 'column', gap: '3px' },
   abonoBadge:    { background: '#FFF3E0', border: '1px solid #FFCC80', borderRadius: '6px', padding: '8px 12px', fontSize: '0.82rem', color: '#E65100', fontWeight: 600, marginBottom: '10px' },
 }
