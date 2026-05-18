@@ -70,5 +70,5 @@ const styles = {
     fontSize: '0.78rem',
     cursor: 'pointer',
   },
-  main: { maxWidth: '1100px', margin: '0 auto', padding: '32px 24px' },
+  main: { padding: '0' },
 }
