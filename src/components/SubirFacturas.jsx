@@ -238,20 +238,36 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
               <div
                 key={fila.id}
                 onClick={() => setSeleccionId(fila.id)}
-                style={{ ...s.listaItem, ...(isSelected ? s.listaItemSelected : {}) }}
+                style={{ 
+                  ...s.listaItem, 
+                  ...(isSelected ? s.listaItemSelected : {}),
+                  ...(fila.estado === 'validada' ? s.listaItemValidada : {})
+                }}
               >
-                <div style={s.listaItemTop}>
-                  <span style={s.listaItemNum}>{fila.datos?.num_factura || '—'}</span>
-                  <EstadoBadgeMini estado={fila.estado} />
-                </div>
-                <div style={s.listaItemExp}>{fila.datos?.expedidor || fila.nombre}</div>
-                <div style={s.listaItemBottom}>
-                  <span style={s.listaItemFecha}>{fila.datos?.fecha_expedicion || ''}</span>
-                  <span style={s.listaItemImporte}>
-                    {fila.datos ? `${(parseFloat(fila.datos.base_imponible||0) + parseFloat(fila.datos.cuota_iva||0)).toFixed(2)} €` : '—'}
-                  </span>
-                  <span style={{ ...s.confDot, color: confColor }}>●</span>
-                </div>
+                {fila.estado === 'validada' && !isSelected ? (
+                  // Vista compacta para validadas
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: '#2E7D32', fontSize: '0.72rem', fontWeight: 700 }}>✓</span>
+                    <span style={{ fontSize: '0.75rem', color: '#2E7D32', fontFamily: 'monospace', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fila.datos?.num_factura || fila.nombre}</span>
+                    <span style={{ fontSize: '0.72rem', color: '#2E7D32', fontWeight: 600 }}>{fila.datos ? `${(parseFloat(fila.datos.base_imponible||0) + parseFloat(fila.datos.cuota_iva||0)).toFixed(2)}€` : ''}</span>
+                  </div>
+                ) : (
+                  // Vista normal para pendientes y seleccionadas
+                  <>
+                    <div style={s.listaItemTop}>
+                      <span style={s.listaItemNum}>{fila.datos?.num_factura || '—'}</span>
+                      <EstadoBadgeMini estado={fila.estado} />
+                    </div>
+                    <div style={s.listaItemExp}>{fila.datos?.expedidor || fila.nombre}</div>
+                    <div style={s.listaItemBottom}>
+                      <span style={s.listaItemFecha}>{fila.datos?.fecha_expedicion || ''}</span>
+                      <span style={s.listaItemImporte}>
+                        {fila.datos ? `${(parseFloat(fila.datos.base_imponible||0) + parseFloat(fila.datos.cuota_iva||0)).toFixed(2)} €` : '—'}
+                      </span>
+                      <span style={{ ...s.confDot, color: confColor }}>●</span>
+                    </div>
+                  </>
+                )}
               </div>
             )
           })}
@@ -330,18 +346,10 @@ function EditorFactura({ fila, onChange, onChangeLinea, onValidar, onError }) {
 
   return (
     <div style={s.editorWrap}>
-      {/* Cabecera estado */}
+      {/* Cabecera — solo info confianza */}
       <div style={s.editorHeader}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ ...s.confDot, color: confColor, fontSize: '0.85rem' }}>● Confianza {datos.confianza}</span>
-          {datos.tipo === 'abono' && <span style={s.abonoBadge}>ABONO</span>}
-        </div>
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button onClick={onValidar} style={{ ...s.btnOk, ...(isValidada ? s.btnOkActive : {}) }}>
-            ✓ {isValidada ? 'Validada' : 'Validar'}
-          </button>
-          <button onClick={onError} style={s.btnErr}>✗</button>
-        </div>
+        <span style={{ ...s.confDot, color: confColor, fontSize: '0.85rem' }}>● Confianza {datos.confianza}</span>
+        {datos.tipo === 'abono' && <span style={s.abonoBadge}>ABONO</span>}
       </div>
 
       {/* Campos editables */}
@@ -399,6 +407,14 @@ function EditorFactura({ fila, onChange, onChangeLinea, onValidar, onError }) {
           <div style={s.notasBox}>⚠ {datos.notas}</div>
         )}
       </div>
+
+      {/* Footer fijo con botones de acción */}
+      <div style={s.editorFooter}>
+        <button onClick={onError} style={s.btnErrFull}>✗ Marcar error</button>
+        <button onClick={onValidar} style={{ ...s.btnOkFull, ...(isValidada ? s.btnOkActive : {}) }}>
+          ✓ {isValidada ? 'Factura validada' : 'Validar y confirmar'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -436,15 +452,16 @@ const s = {
   dropBtn:        { background: '#1A472A', color: '#fff', border: 'none', borderRadius: '7px', padding: '9px 20px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
 
   // Layout visor
-  visorShell:     { display: 'grid', gridTemplateColumns: '260px 1fr 300px', gap: '0', height: 'calc(100vh - 180px)', background: '#fff', border: '1px solid #D8D4CB', borderRadius: '10px', overflow: 'hidden' },
+  visorShell:     { display: 'grid', gridTemplateColumns: '260px 1fr 300px', gap: '0', height: 'calc(100vh - 120px)', background: '#fff', border: '1px solid #D8D4CB', borderRadius: '10px', overflow: 'hidden' },
 
   // Columna izquierda — lista
   listaCol:       { display: 'flex', flexDirection: 'column', borderRight: '1px solid #D8D4CB', background: '#F5F3EE' },
   listaHeader:    { padding: '12px 14px', borderBottom: '1px solid #D8D4CB', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff' },
   listaTitle:     { fontSize: '0.82rem', fontWeight: 700, color: '#1C1C1C' },
   listaScroll:    { flex: 1, overflowY: 'auto' },
-  listaItem:      { padding: '10px 14px', borderBottom: '1px solid #EDEAE3', cursor: 'pointer', transition: 'background 0.1s' },
+  listaItem:      { padding: '10px 14px', borderBottom: '1px solid #EDEAE3', cursor: 'pointer', transition: 'background 0.1s', position: 'relative' },
   listaItemSelected: { background: '#E8F5E9', borderLeft: '3px solid #1A472A' },
+  listaItemValidada:  { background: '#F0FFF4', padding: '5px 14px' },
   listaItemTop:   { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' },
   listaItemNum:   { fontSize: '0.78rem', fontFamily: 'monospace', fontWeight: 700, color: '#1C1C1C' },
   listaItemExp:   { fontSize: '0.78rem', color: '#1C1C1C', marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
@@ -468,9 +485,9 @@ const s = {
 
   // Columna derecha — editor
   editCol:        { borderLeft: '1px solid #D8D4CB', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  editorWrap:     { display: 'flex', flexDirection: 'column', height: '100%' },
+  editorWrap:     { display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' },
   editorHeader:   { padding: '12px 14px', borderBottom: '1px solid #D8D4CB', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff', flexShrink: 0 },
-  editorBody:     { flex: 1, overflowY: 'auto', padding: '14px' },
+  editorBody:     { flex: 1, overflowY: 'auto', padding: '14px', paddingBottom: '0' },
   fieldGroup:     { marginBottom: '10px' },
   fieldLabel:     { display: 'block', fontSize: '0.7rem', fontWeight: 600, color: '#6B6B6B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' },
   fieldInput:     { width: '100%', padding: '7px 9px', border: '1px solid #D8D4CB', borderRadius: '6px', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' },
@@ -484,6 +501,9 @@ const s = {
   notasBox:       { background: '#FFF8E1', border: '1px solid #FFE082', borderRadius: '6px', padding: '8px 10px', fontSize: '0.78rem', color: '#F57F17', marginTop: '12px' },
   abonoBadge:     { background: '#FFF3E0', color: '#E65100', border: '1px solid #FFCC80', borderRadius: '4px', padding: '2px 8px', fontSize: '0.7rem', fontWeight: 700 },
   confDot:        { fontSize: '0.75rem', fontWeight: 600 },
+  editorFooter:   { padding: '12px 14px', borderTop: '1px solid #D8D4CB', background: '#fff', display: 'flex', gap: '8px', flexShrink: 0 },
+  btnOkFull:      { flex: 2, background: '#E8F5E9', color: '#2E7D32', border: '1px solid #A5D6A7', borderRadius: '7px', padding: '10px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer' },
+  btnErrFull:     { flex: 1, background: '#FFF3E0', color: '#E65100', border: '1px solid #FFCC80', borderRadius: '7px', padding: '10px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
   btnOk:          { background: '#E8F5E9', color: '#2E7D32', border: '1px solid #A5D6A7', borderRadius: '6px', padding: '5px 12px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' },
   btnOkActive:    { background: '#2E7D32', color: '#fff', borderColor: '#2E7D32' },
   btnErr:         { background: '#FFF3E0', color: '#E65100', border: '1px solid #FFCC80', borderRadius: '6px', padding: '5px 10px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' },
