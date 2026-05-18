@@ -182,31 +182,26 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
   const validadas  = filas.filter(f => f.estado === 'validada').length
   const pendientes = filas.filter(f => f.estado === 'pendiente').length
 
-  // ── Drop zone inicial ──────────────────────────────────────────────────────
-  if (filas.length === 0 && cola.length === 0) {
-    return (
-      <div style={s.dropWrap} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onClick={() => fileInputRef.current.click()}>
-        <input ref={fileInputRef} type="file" accept="image/*,.pdf" multiple style={{ display: 'none' }} onChange={onFileChange} />
-        <div style={s.dropIcon}>📄</div>
-        <p style={s.dropTitle}>Arrastra facturas aquí</p>
-        <p style={s.dropSub}>PDF multipágina, JPG, PNG · Separa automáticamente cada factura</p>
-        <button style={s.dropBtn} onClick={e => { e.stopPropagation(); fileInputRef.current.click() }}>Seleccionar archivos</button>
-      </div>
-    )
-  }
-
-  // ── Visor tipo app escritorio ──────────────────────────────────────────────
+  // ── Siempre muestra el visor ──────────────────────────────────────────────
   return (
     <div style={s.appShell}>
 
       {/* IZQUIERDA — lista */}
       <div style={s.leftCol}>
+        {/* Mini drop zone siempre visible */}
+        <div
+          style={{ ...s.miniDrop, ...(dragOver ? s.miniDropActive : {}) }}
+          onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
+          onClick={() => fileInputRef.current.click()}
+        >
+          <input ref={fileInputRef} type="file" accept="image/*,.pdf" multiple style={{ display: 'none' }} onChange={onFileChange} />
+          <span style={s.miniDropIcon}>📄</span>
+          <span style={s.miniDropText}>Arrastra o haz clic para subir facturas</span>
+        </div>
         <div style={s.leftHeader}>
-          <span style={s.leftTitle}>Facturas ({filas.length})</span>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <input ref={fileInputRef} type="file" accept="image/*,.pdf" multiple style={{ display: 'none' }} onChange={onFileChange} />
-            <button onClick={() => fileInputRef.current.click()} style={s.btnAnadir}>+ Añadir</button>
-          </div>
+          <span style={s.leftTitle}>
+            {filas.length > 0 ? `Facturas (${filas.length})` : 'Sin facturas'}
+          </span>
         </div>
 
         {cola.filter(c => c.estado === 'procesando').map(item => (
@@ -267,7 +262,27 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
       <div style={s.centerCol}>
         {filaSeleccionada?.previewUrl ? (
           filaSeleccionada.archivo?.type === 'application/pdf'
-            ? <iframe src={`${filaSeleccionada.previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`} style={s.visorFrame} title="Factura" />
+            ? <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                <iframe src={`${filaSeleccionada.previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`} style={s.visorFrame} title="Factura" />
+                {/* Overlay transparente para capturar clicks en PDF */}
+                <div
+                  style={{ position: 'absolute', inset: 0, cursor: lupa ? 'zoom-out' : 'zoom-in', zIndex: 2, background: 'transparent' }}
+                  onClick={e => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const xPct = (e.clientX - rect.left) / rect.width * 100
+                    const yPct = (e.clientY - rect.top)  / rect.height * 100
+                    setLupa(l => l ? null : { xPct, yPct, url: filaSeleccionada.previewUrl, isPdf: true })
+                  }}
+                />
+                {lupa?.isPdf && (
+                  <div style={{ position: 'absolute', top: `${Math.max(5, Math.min(lupa.yPct - 22, 50))}%`, left: `${Math.max(5, Math.min(lupa.xPct - 22, 50))}%`, width: '44%', paddingBottom: '44%', borderRadius: '50%', border: '3px solid #1A472A', boxShadow: '0 8px 32px rgba(0,0,0,0.8)', overflow: 'hidden', pointerEvents: 'none', zIndex: 10 }}>
+                    <iframe
+                      src={`${lupa.url}#toolbar=0&navpanes=0&scrollbar=0&view=FitH&zoom=300`}
+                      style={{ position: 'absolute', width: '300%', height: '300%', top: `${-lupa.yPct * 2}%`, left: `${-lupa.xPct * 2}%`, border: 'none', pointerEvents: 'none' }}
+                    />
+                  </div>
+                )}
+              </div>
             : (
               <div style={s.visorImgWrap} onClick={e => {
                 const rect = e.currentTarget.getBoundingClientRect()
@@ -426,6 +441,10 @@ const NAV_H = 56 // altura del navbar en px
 const s = {
   // Drop zone
   dropWrap:    { border: '2px dashed #D8D4CB', borderRadius: '10px', background: '#fff', padding: '60px 24px', textAlign: 'center', cursor: 'pointer' },
+  miniDrop:    { padding: '10px 14px', borderBottom: '1px solid #D8D4CB', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', background: '#fff', flexShrink: 0, transition: 'background 0.15s', borderRadius: '8px 8px 0 0' },
+  miniDropActive: { background: '#E8F5E9' },
+  miniDropIcon:{ fontSize: '1rem' },
+  miniDropText:{ fontSize: '0.74rem', color: '#6B6B6B', fontWeight: 500 },
   dropIcon:    { fontSize: '3rem', marginBottom: '12px' },
   dropTitle:   { fontWeight: 700, fontSize: '1.1rem', marginBottom: '8px' },
   dropSub:     { fontSize: '0.85rem', color: '#6B6B6B', marginBottom: '18px' },
@@ -442,11 +461,14 @@ const s = {
     gridTemplateColumns: '240px 1fr 420px',
     background: '#fff',
     zIndex: 50,
+    padding: '8px',
+    gap: '8px',
+    background: '#1E1E1E',
   },
 
   // Columna izquierda
-  leftCol:     { display: 'flex', flexDirection: 'column', borderRight: '1px solid #D8D4CB', background: '#F5F3EE', overflow: 'hidden' },
-  leftHeader:  { padding: '12px 14px', borderBottom: '1px solid #D8D4CB', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff', flexShrink: 0 },
+  leftCol:     { display: 'flex', flexDirection: 'column', background: '#F5F3EE', overflow: 'hidden', borderRadius: '8px' },
+  leftHeader:  { padding: '8px 14px', borderBottom: '1px solid #D8D4CB', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#F5F3EE', flexShrink: 0 },
   leftTitle:   { fontSize: '0.85rem', fontWeight: 700 },
   leftScroll:  { flex: 1, overflowY: 'auto' },
   leftFooter:  { padding: '10px 14px', borderTop: '1px solid #D8D4CB', background: '#fff', flexShrink: 0 },
@@ -475,14 +497,14 @@ const s = {
   btnGuardar:  { width: '100%', background: '#1A472A', color: '#fff', border: 'none', borderRadius: '7px', padding: '10px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
 
   // Columna central — visor
-  centerCol:   { display: 'flex', flexDirection: 'column', background: '#1E1E1E', overflow: 'hidden' },
+  centerCol:   { display: 'flex', flexDirection: 'column', background: '#1E1E1E', overflow: 'hidden', borderRadius: '8px' },
   visorFrame:  { width: '100%', height: '100%', border: 'none', display: 'block' },
-  visorImgWrap:{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'flex-start', padding: '8px', alignItems: 'flex-start', position: 'relative' },
-  visorImg:    { width: '100%', boxShadow: '0 2px 12px rgba(0,0,0,0.5)' },
+  visorImgWrap:{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', padding: '24px', alignItems: 'flex-start', position: 'relative', background: '#1E1E1E' },
+  visorImg:    { width: '88%', boxShadow: '0 4px 24px rgba(0,0,0,0.7)', borderRadius: '2px' },
   visorEmpty:  { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6B6B6B', gap: '10px' },
 
   // Columna derecha — editor
-  rightCol:    { borderLeft: '1px solid #D8D4CB', display: 'flex', overflow: 'hidden' },
+  rightCol:    { display: 'flex', overflow: 'hidden', borderRadius: '8px', background: '#fff' },
   editorShell: { display: 'flex', flexDirection: 'column', width: '100%', overflow: 'hidden' },
   editorTop:   { padding: '10px 14px', borderBottom: '1px solid #D8D4CB', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, background: '#fafafa' },
   editorScroll:{ flex: 1, overflowY: 'auto', padding: '14px' },
