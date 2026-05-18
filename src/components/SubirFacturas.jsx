@@ -11,6 +11,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
   const [filas,       setFilas]       = useState([])
   const [seleccionId, setSeleccionId] = useState(null)
   const [guardando,   setGuardando]   = useState(false)
+  const [lupa,        setLupa]        = useState(null) // { x, y } coords del click
 
   const filaSeleccionada = filas.find(f => f.id === seleccionId) || filas[0] || null
   const visorActivo = filas.length > 0 || cola.length > 0
@@ -267,7 +268,39 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
         {filaSeleccionada?.previewUrl ? (
           filaSeleccionada.archivo?.type === 'application/pdf'
             ? <iframe src={`${filaSeleccionada.previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`} style={s.visorFrame} title="Factura" />
-            : <div style={s.visorImgWrap}><img src={filaSeleccionada.previewUrl} alt="Factura" style={s.visorImg} /></div>
+            : (
+              <div style={s.visorImgWrap} onClick={e => {
+                const rect = e.currentTarget.getBoundingClientRect()
+                const xPct = (e.clientX - rect.left) / rect.width * 100
+                const yPct = (e.clientY - rect.top)  / rect.height * 100
+                setLupa(l => l ? null : { xPct, yPct })
+              }}>
+                <img src={filaSeleccionada.previewUrl} alt="Factura" style={{ ...s.visorImg, cursor: lupa ? 'zoom-out' : 'zoom-in' }} />
+                {lupa && (
+                  <div style={{
+                    position: 'absolute',
+                    top: `${Math.max(0, Math.min(lupa.yPct - 20, 55))}%`,
+                    left: `${Math.max(0, Math.min(lupa.xPct - 20, 55))}%`,
+                    width: '42%',
+                    paddingBottom: '42%',
+                    borderRadius: '50%',
+                    border: '3px solid #1A472A',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                    overflow: 'hidden',
+                    pointerEvents: 'none',
+                    zIndex: 10,
+                  }}>
+                    <div style={{
+                      position: 'absolute', inset: 0,
+                      backgroundImage: `url(${filaSeleccionada.previewUrl})`,
+                      backgroundSize: '400%',
+                      backgroundPosition: `${lupa.xPct}% ${lupa.yPct}%`,
+                      backgroundRepeat: 'no-repeat',
+                    }} />
+                  </div>
+                )}
+              </div>
+            )
         ) : (
           <div style={s.visorEmpty}><span style={{ fontSize: '3rem' }}>📄</span><p>Selecciona una factura</p></div>
         )}
@@ -406,7 +439,7 @@ const s = {
     right: 0,
     bottom: 0,
     display: 'grid',
-    gridTemplateColumns: '260px 1fr 340px',
+    gridTemplateColumns: '240px 1fr 420px',
     background: '#fff',
     zIndex: 50,
   },
@@ -444,7 +477,7 @@ const s = {
   // Columna central — visor
   centerCol:   { display: 'flex', flexDirection: 'column', background: '#1E1E1E', overflow: 'hidden' },
   visorFrame:  { width: '100%', height: '100%', border: 'none', display: 'block' },
-  visorImgWrap:{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'flex-start', padding: '8px', alignItems: 'flex-start' },
+  visorImgWrap:{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'flex-start', padding: '8px', alignItems: 'flex-start', position: 'relative' },
   visorImg:    { width: '100%', boxShadow: '0 2px 12px rgba(0,0,0,0.5)' },
   visorEmpty:  { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6B6B6B', gap: '10px' },
 
