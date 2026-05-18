@@ -1,67 +1,112 @@
 import { useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { PDFDocument } from 'pdf-lib'
 
 export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
-  const { user } = useAuth()
+  const { user }    = useAuth()
   const fileInputRef = useRef()
-  const [dragOver,  setDragOver]  = useState(false)
-  const [cola,      setCola]      = useState([])
-  const [filas,     setFilas]     = useState([])
-  const [guardando, setGuardando] = useState(false)
+  const [dragOver,   setDragOver]   = useState(false)
+  const [cola,       setCola]       = useState([])
+  const [filas,      setFilas]      = useState([])
+  const [guardando,  setGuardando]  = useState(false)
 
-  function onDragOver(e)  { e.preventDefault(); setDragOver(true) }
-  function onDragLeave()  { setDragOver(false) }
-  function onDrop(e)      { e.preventDefault(); setDragOver(false); handleFiles(Array.from(e.dataTransfer.files)) }
-  function onFileChange(e){ handleFiles(Array.from(e.target.files)); e.target.value = '' }
+  function onDragOver(e)   { e.preventDefault(); setDragOver(true) }
+  function onDragLeave()   { setDragOver(false) }
+  function onDrop(e)       { e.preventDefault(); setDragOver(false); handleFiles(Array.from(e.dataTransfer.files)) }
+  function onFileChange(e) { handleFiles(Array.from(e.target.files)); e.target.value = '' }
 
   function handleFiles(files) {
-    const validos = files.filter(f =>
-      f.type === 'application/pdf' ||
-      f.type === 'image/jpeg' ||
-      f.type === 'image/png' ||
-      f.type === 'image/webp'
-    )
-    validos.forEach(procesarArchivo)
+    files
+      .filter(f => ['application/pdf','image/jpeg','image/png','image/webp'].includes(f.type))
+      .forEach(procesarArchivo)
   }
 
   async function procesarArchivo(file) {
+    if (file.type === 'application/pdf') {
+      await procesarPDF(file)
+    } else {
+      await procesarImagen(file)
+    }
+  }
+
+  // ── PDF: separar página por página ────────────────────────────────────────
+  async function procesarPDF(file) {
+    const buffer    = await file.arrayBuffer()
+    const pdfDoc    = await PDFDocument.load(buffer)
+    const numPages  = pdfDoc.getPageCount()
+
+    for (let i = 0; i < numPages; i++) {
+      const id = crypto.randomUUID()
+      const nombre = numPages === 1
+        ? file.name
+        : `${file.name} — pág. ${i + 1} de ${numPages}`
+
+      setCola(c => [...c, { id, nombre, estado: 'procesando' }])
+
+      try {
+        // Extraer solo esta página en un PDF nuevo
+        const paginaDoc = await PDFDocument.create()
+        const [pagina]  = await paginaDoc.copyPages(pdfDoc, [i])
+        paginaDoc.addPage(pagina)
+        const paginaBytes = await paginaDoc.save()
+        const paginaBlob  = new Blob([paginaBytes], { type: 'application/pdf' })
+        const paginaFile  = new File([paginaBlob], `pagina_${i+1}.pdf`, { type: 'application/pdf' })
+
+        const resultado = await llamarEdgeFunction(paginaFile)
+
+        // Ignorar páginas en blanco o sin factura
+        if (resultado?.es_factura === false) {
+          setCola(c => c.filter(item => item.id !== id))
+          continue
+        }
+
+        setCola(c => c.map(item => item.id === id ? { ...item, estado: 'listo' } : item))
+        setFilas(f => [...f, { id, archivo: paginaFile, nombre, datos: resultado, estado: 'pendiente' }])
+
+      } catch (err) {
+        console.error(err)
+        setCola(c => c.map(item => item.id === id ? { ...item, estado: 'error' } : item))
+        setFilas(f => [...f, { id, archivo: file, nombre, datos: null, estado: 'error' }])
+      }
+    }
+  }
+
+  // ── Imagen: procesar directamente ─────────────────────────────────────────
+  async function procesarImagen(file) {
     const id = crypto.randomUUID()
     setCola(c => [...c, { id, nombre: file.name, estado: 'procesando' }])
-
     try {
-      // Llamar a la Edge Function — la API key de Anthropic queda en el servidor
-      const { data: { session } } = await supabase.auth.getSession()
-      const formData = new FormData()
-      formData.append('archivo', file)
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/procesar-factura`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`,
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          },
-          body: formData,
-        }
-      )
-
-      if (!response.ok) {
-        const err = await response.text()
-        throw new Error(err)
-      }
-
-      const parsed = await response.json()
-
-      setCola(c => c.map(i => i.id === id ? { ...i, estado: 'listo' } : i))
-      setFilas(f => [...f, { id, archivo: file, nombre: file.name, datos: parsed, estado: 'pendiente' }])
-
+      const resultado = await llamarEdgeFunction(file)
+      setCola(c => c.map(item => item.id === id ? { ...item, estado: 'listo' } : item))
+      setFilas(f => [...f, { id, archivo: file, nombre: file.name, datos: resultado, estado: 'pendiente' }])
     } catch (err) {
       console.error(err)
-      setCola(c => c.map(i => i.id === id ? { ...i, estado: 'error' } : i))
+      setCola(c => c.map(item => item.id === id ? { ...item, estado: 'error' } : item))
       setFilas(f => [...f, { id, archivo: file, nombre: file.name, datos: null, estado: 'error' }])
     }
+  }
+
+  // ── Llamada a la Edge Function ─────────────────────────────────────────────
+  async function llamarEdgeFunction(file) {
+    const { data: { session } } = await supabase.auth.getSession()
+    const formData = new FormData()
+    formData.append('archivo', file)
+
+    const response = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/procesar-factura`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: formData,
+      }
+    )
+
+    if (!response.ok) throw new Error(await response.text())
+    return await response.json()
   }
 
   function editarCampo(id, campo, valor) {
@@ -95,7 +140,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
         }
 
         const { datos } = fila
-        const { error } = await supabase.from('facturas').insert({
+        await supabase.from('facturas').insert({
           cliente_id:       clienteId,
           tipo:             'recibida',
           estado:           'validada',
@@ -115,7 +160,6 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
           ia_raw:           datos,
           ia_confianza:     datos.confianza         || 'media',
         })
-        if (error) console.error('Error guardando factura:', error)
       } catch (err) {
         console.error('Error guardando factura:', err)
       }
@@ -134,27 +178,25 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
     <div>
       <div
         style={{ ...s.dropZone, ...(dragOver ? s.dropZoneActive : {}) }}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
+        onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
         onClick={() => fileInputRef.current.click()}
       >
         <input ref={fileInputRef} type="file" accept="image/*,.pdf" multiple style={{ display: 'none' }} onChange={onFileChange} />
         <div style={s.dropIcon}>📄</div>
         <p style={s.dropTitle}>Arrastra facturas aquí</p>
-        <p style={s.dropSub}>PDF, JPG, PNG · Múltiples archivos a la vez</p>
+        <p style={s.dropSub}>PDF multipágina, JPG, PNG · Separa automáticamente cada factura</p>
         <button style={s.dropBtn} onClick={e => { e.stopPropagation(); fileInputRef.current.click() }}>Seleccionar archivos</button>
       </div>
 
       {cola.length > 0 && (
         <div style={s.colaSection}>
-          <p style={s.sectionLabel}>Cola de procesamiento</p>
+          <p style={s.sectionLabel}>Procesando {cola.length} página{cola.length !== 1 ? 's' : ''}…</p>
           {cola.map(item => (
             <div key={item.id} style={s.colaItem}>
-              <span style={s.colaIcon}>{item.archivo?.type === 'application/pdf' ? '📋' : '🖼️'}</span>
+              <span style={s.colaIcon}>📋</span>
               <span style={s.colaNombre}>{item.nombre}</span>
               <span style={{ ...s.colaBadge, ...estadoStyle(item.estado) }}>
-                {item.estado === 'procesando' ? '⟳ Procesando…' : item.estado === 'listo' ? '✓ Listo' : '✗ Error'}
+                {item.estado === 'procesando' ? '⟳ Leyendo…' : item.estado === 'listo' ? '✓ Listo' : '✗ Error'}
               </span>
             </div>
           ))}
@@ -179,8 +221,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
           <div style={s.tableWrap}>
             {filas.map(fila => (
               <FilaFactura
-                key={fila.id}
-                fila={fila}
+                key={fila.id} fila={fila}
                 onChange={(campo, valor) => editarCampo(fila.id, campo, valor)}
                 onValidar={() => setEstadoFila(fila.id, 'validada')}
                 onError={()   => setEstadoFila(fila.id, 'error')}
@@ -194,42 +235,68 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
 }
 
 function FilaFactura({ fila, onChange, onValidar, onError }) {
-  const { datos, nombre, estado } = fila
+  const { datos, nombre, estado, archivo } = fila
+  const [preview, setPreview] = useState(null)
+
   if (!datos) return (
-    <div style={s.filaError}>
-      <span>✗ No se pudo leer <strong>{nombre}</strong> — revisión manual necesaria</span>
-    </div>
+    <div style={s.filaError}>✗ No se pudo leer <strong>{nombre}</strong> — revisión manual necesaria</div>
   )
   const confColor  = { alta: '#2E7D32', media: '#F57F17', baja: '#E65100' }[datos.confianza] || '#6B6B6B'
   const isValidada = estado === 'validada'
+  const total      = ((parseFloat(datos.base_imponible)||0) + (parseFloat(datos.cuota_iva)||0)).toFixed(2)
+
+  function verFactura() { setPreview(URL.createObjectURL(archivo)) }
+  function cerrarPreview() { if (preview) URL.revokeObjectURL(preview); setPreview(null) }
+
   return (
-    <div style={{ ...s.filaCard, ...(isValidada ? s.filaValidada : {}) }}>
-      <div style={s.filaTop}>
-        <span style={s.filaNombre}>📄 {nombre}</span>
-        <span style={{ ...s.confBadge, color: confColor }}>● Confianza {datos.confianza}</span>
-        {datos.notas && <span style={s.filaNota} title={datos.notas}>⚠ nota</span>}
+    <>
+      <div style={{ ...s.filaCard, ...(isValidada ? s.filaValidada : {}) }}>
+        <div style={s.filaTop}>
+          <span style={s.filaNombre}>📄 {nombre}</span>
+          <span style={{ ...s.confBadge, color: confColor }}>● Confianza {datos.confianza}</span>
+          {datos.notas && <span style={s.filaNota} title={datos.notas}>⚠ nota</span>}
+        </div>
+        <div style={s.filaGrid}>
+          <Campo label="Nº Factura"  value={datos.num_factura}      onChange={v => onChange('num_factura', v)}    mono />
+          <Campo label="Expedidor"   value={datos.expedidor}        onChange={v => onChange('expedidor', v)}      wide />
+          <Campo label="NIF / CIF"   value={datos.nif_expedidor}    onChange={v => onChange('nif_expedidor', v)}  mono />
+          <Campo label="Fecha"       value={datos.fecha_expedicion} onChange={v => onChange('fecha_expedicion', v)} small />
+          <Campo label="Concepto"    value={datos.concepto}         onChange={v => onChange('concepto', v)}       wide />
+          <Campo label="Base Imp."   value={datos.base_imponible}   onChange={v => onChange('base_imponible', v)} small right />
+          <Campo label="% IVA"       value={datos.pct_iva}          onChange={v => onChange('pct_iva', v)}        small right />
+          <Campo label="Cuota IVA"   value={datos.cuota_iva}        onChange={v => onChange('cuota_iva', v)}      small right />
+          <Campo label="Deducible"   value={datos.deducible}        onChange={v => onChange('deducible', v)}      small right />
+          <Campo label="Total"       value={total}                  onChange={() => {}}                           small right />
+        </div>
+        <div style={s.filaActions}>
+          <button onClick={onValidar} style={{ ...s.btnOk, ...(isValidada ? s.btnOkActive : {}) }}>
+            ✓ {isValidada ? 'Validada' : 'Validar'}
+          </button>
+          <button onClick={onError} style={{ ...s.btnErr, ...(estado === 'error' ? s.btnErrActive : {}) }}>
+            ✗ Error
+          </button>
+          <button onClick={verFactura} style={s.btnVer}>
+            🔍 Ver factura
+          </button>
+        </div>
       </div>
-      <div style={s.filaGrid}>
-        <Campo label="Nº Factura"  value={datos.num_factura}     onChange={v => onChange('num_factura', v)}    mono />
-        <Campo label="Expedidor"   value={datos.expedidor}       onChange={v => onChange('expedidor', v)}      wide />
-        <Campo label="NIF / CIF"   value={datos.nif_expedidor}   onChange={v => onChange('nif_expedidor', v)}  mono />
-        <Campo label="Fecha"       value={datos.fecha_expedicion} onChange={v => onChange('fecha_expedicion', v)} small />
-        <Campo label="Concepto"    value={datos.concepto}        onChange={v => onChange('concepto', v)}       wide />
-        <Campo label="Base Imp."   value={datos.base_imponible}  onChange={v => onChange('base_imponible', v)} small right />
-        <Campo label="% IVA"       value={datos.pct_iva}         onChange={v => onChange('pct_iva', v)}        small right />
-        <Campo label="Cuota IVA"   value={datos.cuota_iva}       onChange={v => onChange('cuota_iva', v)}      small right />
-        <Campo label="Deducible"   value={datos.deducible}       onChange={v => onChange('deducible', v)}      small right />
-        <Campo label="Total"       value={((parseFloat(datos.base_imponible)||0) + (parseFloat(datos.cuota_iva)||0)).toFixed(2)} onChange={() => {}} small right />
-      </div>
-      <div style={s.filaActions}>
-        <button onClick={onValidar} style={{ ...s.btnOk, ...(isValidada ? s.btnOkActive : {}) }}>
-          ✓ {isValidada ? 'Validada' : 'Validar'}
-        </button>
-        <button onClick={onError} style={{ ...s.btnErr, ...(estado === 'error' ? s.btnErrActive : {}) }}>
-          ✗ Error
-        </button>
-      </div>
-    </div>
+
+      {preview && (
+        <div style={s.overlay} onClick={cerrarPreview}>
+          <div style={s.previewModal} onClick={e => e.stopPropagation()}>
+            <div style={s.previewHeader}>
+              <span style={s.previewNombre}>📄 {nombre}</span>
+              <button onClick={cerrarPreview} style={s.previewClose}>✕ Cerrar</button>
+            </div>
+            {archivo.type === 'application/pdf' ? (
+              <iframe src={preview} style={s.previewFrame} title="Vista previa" />
+            ) : (
+              <img src={preview} alt="Vista previa" style={s.previewImg} />
+            )}
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -238,9 +305,7 @@ function Campo({ label, value, onChange, mono, wide, small, right }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', ...(wide ? { gridColumn: 'span 2' } : {}) }}>
       <label style={s.campoLabel}>{label}</label>
       <input
-        type="text"
-        value={value ?? ''}
-        onChange={e => onChange(e.target.value)}
+        type="text" value={value ?? ''} onChange={e => onChange(e.target.value)}
         style={{ ...s.campoInput, ...(mono ? { fontFamily: 'monospace', fontSize: '0.8rem' } : {}), ...(right ? { textAlign: 'right' } : {}), ...(small ? { width: '100px' } : {}) }}
       />
     </div>
@@ -285,4 +350,12 @@ const s = {
   btnOkActive:   { background: '#2E7D32', color: '#fff', borderColor: '#2E7D32' },
   btnErr:        { background: '#FFF3E0', color: '#E65100', border: '1px solid #FFCC80', borderRadius: '6px', padding: '6px 14px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' },
   btnErrActive:  { background: '#E65100', color: '#fff', borderColor: '#E65100' },
+  btnVer:        { background: '#F5F3EE', color: '#1C1C1C', border: '1px solid #D8D4CB', borderRadius: '6px', padding: '6px 14px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' },
+  overlay:       { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' },
+  previewModal:  { background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '860px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  previewHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid #D8D4CB' },
+  previewNombre: { fontSize: '0.88rem', fontWeight: 600, color: '#1C1C1C' },
+  previewClose:  { background: 'transparent', border: 'none', fontSize: '0.85rem', cursor: 'pointer', color: '#6B6B6B', fontWeight: 600 },
+  previewFrame:  { width: '100%', flex: 1, border: 'none', minHeight: '70vh' },
+  previewImg:    { width: '100%', maxHeight: '75vh', objectFit: 'contain', padding: '16px' },
 }

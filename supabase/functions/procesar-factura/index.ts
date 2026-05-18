@@ -5,63 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-serve(async (req) => {
-  // CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
-
-  try {
-    // Verificar que el usuario está autenticado
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'No autorizado' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // Leer el archivo enviado
-    const formData  = await req.formData()
-    const archivo   = formData.get('archivo') as File
-    if (!archivo) {
-      return new Response(JSON.stringify({ error: 'No se recibió archivo' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // Convertir a base64
-    const buffer    = await archivo.arrayBuffer()
-    const bytes     = new Uint8Array(buffer)
-    const binary    = bytes.reduce((acc, b) => acc + String.fromCharCode(b), '')
-    const base64    = btoa(binary)
-    const isPdf     = archivo.type === 'application/pdf'
-
-    // Llamar a Anthropic — la key queda en el servidor, nunca en el navegador
-    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
-    if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY no configurada')
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-opus-4-5',
-        max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: isPdf ? 'document' : 'image',
-              source: { type: 'base64', media_type: archivo.type, data: base64 },
-            },
-            {
-              type: 'text',
-              text: `Eres un experto en lectura de facturas españolas.
+const PROMPT = `Eres un experto en lectura de facturas españolas.
 Extrae los datos y responde SOLO con JSON, sin texto adicional ni backticks:
 
 {
@@ -83,8 +27,61 @@ Extrae los datos y responde SOLO con JSON, sin texto adicional ni backticks:
 lineas_extra es un array para cuando hay múltiples tipos de IVA:
 [{ "base_imponible": 0.00, "pct_iva": "0", "cuota_iva": 0, "deducible": 0 }]
 
-Si un campo no aparece usa "" o 0. Responde SOLO con el JSON.`,
+Si un campo no aparece usa "" o 0.
+Si esta página NO contiene una factura (en blanco o portada), responde exactamente: {"es_factura": false}
+Responde SOLO con el JSON.`
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'No autorizado' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const formData = await req.formData()
+    const archivo  = formData.get('archivo') as File
+
+    if (!archivo) {
+      return new Response(JSON.stringify({ error: 'No se recibió archivo' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
+    if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY no configurada')
+
+    const buffer = await archivo.arrayBuffer()
+    const bytes  = new Uint8Array(buffer)
+    const binary = bytes.reduce((acc, b) => acc + String.fromCharCode(b), '')
+    const base64 = btoa(binary)
+    const isPdf  = archivo.type === 'application/pdf'
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-4-5',
+        max_tokens: 1000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: isPdf ? 'document' : 'image',
+              source: { type: 'base64', media_type: archivo.type, data: base64 },
             },
+            { type: 'text', text: PROMPT },
           ],
         }],
       }),
