@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { PDFDocument } from 'pdf-lib'
@@ -13,6 +13,17 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
   const [guardando,   setGuardando]   = useState(false)
 
   const filaSeleccionada = filas.find(f => f.id === seleccionId) || filas[0] || null
+  const visorActivo = filas.length > 0 || cola.length > 0
+
+  // Bloquear scroll del body cuando el visor está activo
+  useEffect(() => {
+    if (visorActivo) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => { document.body.style.overflow = '' }
+  }, [visorActivo])
 
   function onDragOver(e)   { e.preventDefault(); setDragOver(true) }
   function onDragLeave()   { setDragOver(false) }
@@ -255,7 +266,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
       <div style={s.centerCol}>
         {filaSeleccionada?.previewUrl ? (
           filaSeleccionada.archivo?.type === 'application/pdf'
-            ? <iframe src={filaSeleccionada.previewUrl} style={s.visorFrame} title="Factura" />
+            ? <iframe src={`${filaSeleccionada.previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`} style={s.visorFrame} title="Factura" />
             : <div style={s.visorImgWrap}><img src={filaSeleccionada.previewUrl} alt="Factura" style={s.visorImg} /></div>
         ) : (
           <div style={s.visorEmpty}><span style={{ fontSize: '3rem' }}>📄</span><p>Selecciona una factura</p></div>
@@ -395,7 +406,7 @@ const s = {
     right: 0,
     bottom: 0,
     display: 'grid',
-    gridTemplateColumns: '280px 1fr 320px',
+    gridTemplateColumns: '260px 1fr 340px',
     background: '#fff',
     zIndex: 50,
   },
@@ -433,8 +444,8 @@ const s = {
   // Columna central — visor
   centerCol:   { display: 'flex', flexDirection: 'column', background: '#1E1E1E', overflow: 'hidden' },
   visorFrame:  { width: '100%', height: '100%', border: 'none', display: 'block' },
-  visorImgWrap:{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', padding: '20px' },
-  visorImg:    { maxWidth: '100%', boxShadow: '0 4px 24px rgba(0,0,0,0.6)' },
+  visorImgWrap:{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'flex-start', padding: '8px', alignItems: 'flex-start' },
+  visorImg:    { width: '100%', boxShadow: '0 2px 12px rgba(0,0,0,0.5)' },
   visorEmpty:  { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6B6B6B', gap: '10px' },
 
   // Columna derecha — editor
