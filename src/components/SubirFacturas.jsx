@@ -110,9 +110,21 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
   }
 
   function editarCampo(id, campo, valor) {
-    setFilas(f => f.map(fila =>
-      fila.id === id ? { ...fila, datos: { ...fila.datos, [campo]: valor } } : fila
-    ))
+    setFilas(f => f.map(fila => {
+      if (fila.id !== id) return fila
+      const datos = { ...fila.datos, [campo]: valor }
+
+      // Recalcular cuota y deducible cuando cambia base o % IVA
+      if (campo === 'base_imponible' || campo === 'pct_iva') {
+        const base = parseFloat(campo === 'base_imponible' ? valor : datos.base_imponible) || 0
+        const pct  = parseFloat((campo === 'pct_iva' ? valor : datos.pct_iva)?.toString().replace(',', '.')) || 0
+        const cuota = Math.round(base * pct / 100 * 100) / 100
+        datos.cuota_iva = cuota.toFixed(2)
+        datos.deducible = cuota.toFixed(2)
+      }
+
+      return { ...fila, datos }
+    }))
   }
 
   function setEstadoFila(id, estado) {
@@ -268,6 +280,25 @@ function FilaFactura({ fila, onChange, onValidar, onError }) {
           <Campo label="Deducible"   value={datos.deducible}        onChange={v => onChange('deducible', v)}      small right />
           <Campo label="Total"       value={total}                  onChange={() => {}}                           small right />
         </div>
+        {/* Líneas extra de IVA */}
+        {datos.lineas_extra?.length > 0 && (
+          <div style={s.lineasExtra}>
+            <p style={s.lineasLabel}>Líneas adicionales de IVA</p>
+            {datos.lineas_extra.map((linea, idx) => (
+              <div key={idx} style={s.lineaRow}>
+                <span style={s.lineaTag}>IVA {linea.pct_iva}%</span>
+                <span style={s.lineaDato}>Base: {linea.base_imponible} €</span>
+                <span style={s.lineaDato}>Cuota: {linea.cuota_iva} €</span>
+                <span style={s.lineaDato}>Deducible: {linea.deducible} €</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {datos.tipo === 'abono' && (
+          <div style={s.abonoBadge}>⚠ Factura rectificativa / Abono — importes negativos</div>
+        )}
+
         <div style={s.filaActions}>
           <button onClick={onValidar} style={{ ...s.btnOk, ...(isValidada ? s.btnOkActive : {}) }}>
             ✓ {isValidada ? 'Validada' : 'Validar'}
@@ -358,4 +389,10 @@ const s = {
   previewClose:  { background: 'transparent', border: 'none', fontSize: '0.85rem', cursor: 'pointer', color: '#6B6B6B', fontWeight: 600 },
   previewFrame:  { width: '100%', flex: 1, border: 'none', minHeight: '70vh' },
   previewImg:    { width: '100%', maxHeight: '75vh', objectFit: 'contain', padding: '16px' },
+  lineasExtra:   { background: '#F5F3EE', border: '1px solid #D8D4CB', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px' },
+  lineasLabel:   { fontSize: '0.72rem', fontWeight: 600, color: '#6B6B6B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' },
+  lineaRow:      { display: 'flex', gap: '16px', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid #EDEAE3', fontSize: '0.82rem' },
+  lineaTag:      { background: '#1A472A', color: '#fff', borderRadius: '4px', padding: '2px 8px', fontSize: '0.72rem', fontWeight: 700, flexShrink: 0 },
+  lineaDato:     { color: '#1C1C1C' },
+  abonoBadge:    { background: '#FFF3E0', border: '1px solid #FFCC80', borderRadius: '6px', padding: '8px 12px', fontSize: '0.82rem', color: '#E65100', fontWeight: 600, marginBottom: '10px' },
 }

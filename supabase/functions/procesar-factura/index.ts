@@ -5,30 +5,49 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const PROMPT = `Eres un experto en lectura de facturas españolas.
-Extrae los datos y responde SOLO con JSON, sin texto adicional ni backticks:
+const PROMPT = `Eres un experto en lectura de facturas españolas para gestorías contables.
 
+Extrae los datos y responde SOLO con JSON, sin texto adicional ni backticks.
+
+REGLAS IMPORTANTES:
+1. Si la factura tiene MÚLTIPLES tipos de IVA (ej: productos al 21%, otros al 10%, otros al 4% o 0%), crea una línea principal con el importe mayor y el resto en lineas_extra. NUNCA mezcles importes de distintos IVAs en una sola línea.
+2. Los tipos de IVA en España son: 21%, 10%, 5%, 4%, 0%. Léelos directamente de la factura, no asumas siempre 21%.
+3. Si es una factura RECTIFICATIVA o ABONO (importe negativo, pone "abono", "rectificativa", "nota de crédito"), pon los importes en NEGATIVO y tipo "abono".
+4. El campo "deducible" es igual a "cuota_iva" salvo que la factura indique explícitamente que no es deducible.
+5. Si la página no contiene una factura (está en blanco o es portada), responde exactamente: {"es_factura": false}
+
+FORMATO DE RESPUESTA:
 {
-  "num_factura": "número de factura",
+  "num_factura": "número exacto de la factura",
   "fecha_expedicion": "DD/MM/YYYY",
-  "fecha_operacion": "DD/MM/YYYY o vacío",
-  "concepto": "descripción de la factura",
+  "fecha_operacion": "DD/MM/YYYY o vacío si no aparece",
+  "concepto": "descripción breve del proveedor y tipo de compra",
   "nif_expedidor": "NIF o CIF del emisor",
-  "expedidor": "nombre del emisor",
+  "expedidor": "nombre completo del emisor",
+  "tipo": "factura o abono",
   "base_imponible": 0.00,
   "pct_iva": "21,0",
   "cuota_iva": 0.00,
   "deducible": 0.00,
   "confianza": "alta|media|baja",
-  "notas": "observaciones o vacío",
+  "notas": "cualquier observación relevante o vacío",
   "lineas_extra": []
 }
 
-lineas_extra es un array para cuando hay múltiples tipos de IVA:
-[{ "base_imponible": 0.00, "pct_iva": "0", "cuota_iva": 0, "deducible": 0 }]
+lineas_extra — una entrada por cada tipo de IVA adicional:
+[
+  { "base_imponible": 0.00, "pct_iva": "10,0", "cuota_iva": 0.00, "deducible": 0.00 },
+  { "base_imponible": 0.00, "pct_iva": "4,0",  "cuota_iva": 0.00, "deducible": 0.00 },
+  { "base_imponible": 0.00, "pct_iva": "0",     "cuota_iva": 0.00, "deducible": 0.00 }
+]
 
-Si un campo no aparece usa "" o 0.
-Si esta página NO contiene una factura (en blanco o portada), responde exactamente: {"es_factura": false}
+EJEMPLO Makro con 3 tipos de IVA:
+- Línea principal: base 150.00, pct_iva "21,0", cuota 31.50
+- lineas_extra: [
+    { base_imponible: 80.00, pct_iva: "10,0", cuota_iva: 8.00, deducible: 8.00 },
+    { base_imponible: 20.00, pct_iva: "4,0",  cuota_iva: 0.80, deducible: 0.80 }
+  ]
+
 Responde SOLO con el JSON.`
 
 serve(async (req) => {
@@ -73,7 +92,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: 'claude-opus-4-5',
-        max_tokens: 1000,
+        max_tokens: 1500,
         messages: [{
           role: 'user',
           content: [
