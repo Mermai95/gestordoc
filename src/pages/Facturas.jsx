@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { generarSUENLACE } from '../lib/generarSUENLACE'
+import { exportarA3 } from '../lib/exportarA3'
 import SubirFacturas from '../components/SubirFacturas'
 
 export default function Facturas() {
@@ -37,7 +37,7 @@ export default function Facturas() {
 
   function handleExportar() {
     if (!facturas.length) return
-    generarSUENLACE({
+    exportarA3({
       facturas: facturas.map(f => ({
         num_factura: f.num_factura, fecha_expedicion: f.fecha_expedicion,
         fecha_operacion: f.fecha_operacion, concepto: f.concepto,
@@ -46,7 +46,8 @@ export default function Facturas() {
         cuota: f.cuota_iva, deducible: f.deducible, lineas_extra: f.lineas_extra || [],
       })),
       nombreEmpresa: cliente?.nombre ?? '',
-      codigoEmpresa: '00001',
+      periodoInicio: '01 Ene',
+      periodoFin: `31 Dic ${new Date().getFullYear()}`,
       
       
     })
@@ -73,7 +74,7 @@ export default function Facturas() {
         </div>
         <div style={s.headerActions}>
           <button onClick={handleExportar} disabled={validadas.length === 0} style={{ ...s.btnSecondary, opacity: validadas.length === 0 ? 0.4 : 1 }}>
-            ⬇ Exportar SUENLACE.DAT ({validadas.length})
+            ⬇ Exportar Excel A3 ({validadas.length})
           </button>
           <button onClick={() => setMostrarSubida(v => !v)} style={s.btnPrimary}>
             {mostrarSubida ? '✕ Cerrar' : '+ Subir facturas'}
