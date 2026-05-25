@@ -399,23 +399,21 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
                 src={`${filaSeleccionada.previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
                 style={s.visorFrame} title="Factura"
               />
-              {/* Overlay para lupa — no bloquea scroll del iframe */}
-              <div
-                style={{ position: 'absolute', inset: 0, cursor: lupa ? 'zoom-out' : 'zoom-in', zIndex: 2, background: 'transparent' }}
-                onClick={e => {
-                  const rect = e.currentTarget.getBoundingClientRect()
-                  const xPct = (e.clientX - rect.left) / rect.width * 100
-                  const yPct = (e.clientY - rect.top)  / rect.height * 100
-                  setLupa(l => l ? null : { xPct, yPct, url: filaSeleccionada.previewUrl, isPdf: true })
-                }}
-                onWheel={e => { e.stopPropagation() }}
-              />
+              {/* Botón lupa flotante — sin overlay que bloquee el scroll */}
+              <button
+                onClick={() => setLupa(l => l?.isPdf ? null : { isPdf: true, zoom: 150 })}
+                style={s.lupaBtn}
+                title={lupa?.isPdf ? 'Cerrar zoom' : 'Abrir zoom'}
+              >
+                {lupa?.isPdf ? '🔍−' : '🔍+'}
+              </button>
               {lupa?.isPdf && (
-                <div style={{ ...s.lupaCirculo, top: `${Math.max(5, Math.min(lupa.yPct - 22, 50))}%`, left: `${Math.max(5, Math.min(lupa.xPct - 22, 50))}%` }}>
+                <div style={s.lupaPdfBox}>
                   <iframe
-                    src={`${lupa.url}#toolbar=0&navpanes=0&scrollbar=0&zoom=250`}
-                    style={{ position: 'absolute', width: '300%', height: '300%', top: `${-lupa.yPct * 2}%`, left: `${-lupa.xPct * 2}%`, border: 'none', pointerEvents: 'none' }}
+                    src={`${filaSeleccionada.previewUrl}#toolbar=0&navpanes=0&scrollbar=1&zoom=180`}
+                    style={{ width: '100%', height: '100%', border: 'none' }}
                   />
+                  <button onClick={() => setLupa(null)} style={s.lupaPdfClose}>✕</button>
                 </div>
               )}
             </div>
@@ -639,6 +637,9 @@ const s = {
   visorImg:       { width: '88%', boxShadow: '0 4px 24px rgba(0,0,0,0.7)', borderRadius: '2px' },
   visorEmpty:     { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6B6B6B', gap: '10px' },
   lupaCirculo:    { position: 'absolute', width: '42%', paddingBottom: '42%', borderRadius: '50%', border: '3px solid #1A472A', boxShadow: '0 8px 32px rgba(0,0,0,0.8)', overflow: 'hidden', pointerEvents: 'none', zIndex: 10 },
+  lupaBtn:        { position: 'absolute', bottom: '14px', right: '14px', zIndex: 10, background: '#1A472A', color: '#fff', border: 'none', borderRadius: '50%', width: '40px', height: '40px', fontSize: '1rem', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  lupaPdfBox:     { position: 'absolute', inset: 0, zIndex: 9, background: '#1E1E1E' },
+  lupaPdfClose:   { position: 'absolute', top: '10px', right: '10px', background: 'rgba(0,0,0,0.5)', color: '#fff', border: 'none', borderRadius: '50%', width: '32px', height: '32px', fontSize: '1rem', cursor: 'pointer', zIndex: 11 },
 
   rightCol:       { display: 'flex', overflow: 'hidden', borderRadius: '8px', background: '#fff' },
   editorShell:    { display: 'flex', flexDirection: 'column', width: '100%', overflow: 'hidden' },
