@@ -4,26 +4,24 @@ import { useAuth } from '../hooks/useAuth'
 import { PDFDocument } from 'pdf-lib'
 
 export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
-  const { user }      = useAuth()
-  const fileInputRef  = useRef()
-  const [dragOver,    setDragOver]    = useState(false)
-  const [cola,        setCola]        = useState([])
-  const [filas,       setFilas]       = useState([])
-  const [seleccionId, setSeleccionId] = useState(null)
-  const [guardando,   setGuardando]   = useState(false)
-  const [lupa,        setLupa]        = useState(null)
+  const { user }       = useAuth()
+  const fileInputRef   = useRef()
+  const imgWrapRef     = useRef()
+  const [dragOver,     setDragOver]     = useState(false)
+  const [cola,         setCola]         = useState([])
+  const [filas,        setFilas]        = useState([])
+  const [seleccionId,  setSeleccionId]  = useState(null)
+  const [guardando,    setGuardando]    = useState(false)
+  const [lupa,         setLupa]         = useState(null)
   const [visorAbierto, setVisorAbierto] = useState(true)
+  const [selMultiple,  setSelMultiple]  = useState([]) // ids para unir páginas
 
   const filaSeleccionada = filas.find(f => f.id === seleccionId) || filas[0] || null
   const visorActivo = filas.length > 0 || cola.length > 0
 
-  // Bloquear scroll del body cuando el visor está activo
   useEffect(() => {
-    if (visorActivo) {
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.body.style.overflow = ''
-    }
+    if (visorActivo) document.body.style.overflow = 'hidden'
+    else document.body.style.overflow = ''
     return () => { document.body.style.overflow = '' }
   }, [visorActivo])
 
@@ -84,6 +82,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
         if (f.length === 0) setSeleccionId(id)
         return nuevas
       })
+      setVisorAbierto(true)
     } catch (err) {
       console.error(err)
       setCola(c => c.map(x => x.id === id ? { ...x, estado: 'error' } : x))
@@ -142,6 +141,48 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
     }
   }
 
+  // ── Unir páginas manualmente ───────────────────────────────────────────────
+  function toggleSelMultiple(id) {
+    setSelMultiple(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
+  }
+
+  function unirFacturas() {
+    if (selMultiple.length < 2) return
+    const seleccionadas = filas.filter(f => selMultiple.includes(f.id))
+
+    // La página "base" es la que tiene más campos completos
+    const base = seleccionadas.reduce((mejor, f) => {
+      const campos = Object.values(f.datos || {}).filter(v => v && v !== '0' && v !== 0 && v !== '').length
+      const camposMejor = Object.values(mejor.datos || {}).filter(v => v && v !== '0' && v !== 0 && v !== '').length
+      return campos > camposMejor ? f : mejor
+    })
+
+    // Sumar bases e IVAs de todas las páginas
+    const baseTotal     = seleccionadas.reduce((sum, f) => sum + (parseFloat(f.datos?.base_imponible) || 0), 0)
+    const cuotaTotal    = seleccionadas.reduce((sum, f) => sum + (parseFloat(f.datos?.cuota_iva) || 0), 0)
+    const deducibleTotal = seleccionadas.reduce((sum, f) => sum + (parseFloat(f.datos?.deducible) || 0), 0)
+
+    const filaUnida = {
+      ...base,
+      datos: {
+        ...base.datos,
+        base_imponible: baseTotal.toFixed(2),
+        cuota_iva:      cuotaTotal.toFixed(2),
+        deducible:      deducibleTotal.toFixed(2),
+        notas:          base.datos?.notas ? base.datos.notas.replace(/Página \d+ de \d+.*?—\s*/g, '') : '',
+      }
+    }
+
+    setFilas(f => {
+      const sinSeleccionadas = f.filter(x => !selMultiple.includes(x.id))
+      const idxBase = f.findIndex(x => x.id === base.id)
+      sinSeleccionadas.splice(idxBase, 0, filaUnida)
+      return sinSeleccionadas
+    })
+    setSeleccionId(base.id)
+    setSelMultiple([])
+  }
+
   async function guardarValidadas() {
     const validadas = filas.filter(f => f.estado === 'validada')
     if (!validadas.length) return
@@ -175,14 +216,14 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
       } catch (err) { console.error('Error guardando factura:', err) }
     }
     filas.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl) })
-    setGuardando(false); setFilas([]); setCola([]); setSeleccionId(null); setLupa(null)
+    setGuardando(false); setFilas([]); setCola([]); setSeleccionId(null); setLupa(null); setSelMultiple([])
     onFacturasGuardadas?.()
   }
 
   const validadas  = filas.filter(f => f.estado === 'validada').length
   const pendientes = filas.filter(f => f.estado === 'pendiente').length
 
-  // ── PASO 1: Drop zone inicial o visor cerrado ─────────────────────────────
+  // ── Drop zone inicial ──────────────────────────────────────────────────────
   if (!visorActivo || !visorAbierto) {
     return (
       <div
@@ -198,10 +239,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
           Seleccionar archivos del ordenador
         </button>
         {filas.length > 0 && (
-          <button
-            onClick={e => { e.stopPropagation(); setVisorAbierto(true) }}
-            style={s.btnReabrir}
-          >
+          <button onClick={e => { e.stopPropagation(); setVisorAbierto(true) }} style={s.btnReabrir}>
             📋 Volver a las {filas.length} facturas cargadas
           </button>
         )}
@@ -209,7 +247,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
     )
   }
 
-  // ── PASO 2: Visor tipo app escritorio — una vez cargadas ──────────────────
+  // ── Visor principal ────────────────────────────────────────────────────────
   return (
     <div style={s.appShell}>
 
@@ -233,16 +271,26 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
 
         <div style={s.leftScroll}>
           {filas.map(fila => {
-            const isSelected = fila.id === filaSeleccionada?.id
-            const isValidada = fila.estado === 'validada'
-            const confColor  = { alta: '#2E7D32', media: '#F57F17', baja: '#E65100' }[fila.datos?.confianza] || '#6B6B6B'
-            const total      = fila.datos ? (parseFloat(fila.datos.base_imponible||0) + parseFloat(fila.datos.cuota_iva||0)).toFixed(2) : null
+            const isSelected  = fila.id === filaSeleccionada?.id
+            const isValidada  = fila.estado === 'validada'
+            const isMarcada   = selMultiple.includes(fila.id)
+            const confColor   = { alta: '#2E7D32', media: '#F57F17', baja: '#E65100' }[fila.datos?.confianza] || '#6B6B6B'
+            const total       = fila.datos ? (parseFloat(fila.datos.base_imponible||0) + parseFloat(fila.datos.cuota_iva||0)).toFixed(2) : null
+            const tienePagina = fila.datos?.notas?.includes('Página')
+
             return (
               <div key={fila.id}
-                onClick={() => { setSeleccionId(fila.id); setLupa(null) }}
-                style={{ ...s.listaItem, ...(isSelected ? s.listaItemSel : {}), ...(isValidada && !isSelected ? s.listaItemOk : {}) }}
+                onClick={() => {
+                  if (selMultiple.length > 0) toggleSelMultiple(fila.id)
+                  else { setSeleccionId(fila.id); setLupa(null) }
+                }}
+                onContextMenu={e => { e.preventDefault(); toggleSelMultiple(fila.id) }}
+                style={{ ...s.listaItem, ...(isSelected ? s.listaItemSel : {}), ...(isValidada && !isSelected ? s.listaItemOk : {}), ...(isMarcada ? s.listaItemMarcada : {}) }}
               >
-                {isValidada && !isSelected ? (
+                {/* Indicador de paginación */}
+                {tienePagina && <div style={s.paginaAviso}>⚠ Múltiples páginas</div>}
+
+                {isValidada && !isSelected && !isMarcada ? (
                   <div style={s.listaOkRow}>
                     <span style={s.listaOkCheck}>✓</span>
                     <span style={s.listaOkNum}>{fila.datos?.num_factura || fila.nombre}</span>
@@ -252,7 +300,10 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
                   <>
                     <div style={s.listaRowTop}>
                       <span style={s.listaNum}>{fila.datos?.num_factura || '—'}</span>
-                      <BadgeMini estado={fila.estado} />
+                      <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                        {isMarcada && <span style={s.marcadaBadge}>✓ sel.</span>}
+                        <BadgeMini estado={fila.estado} />
+                      </div>
                     </div>
                     <div style={s.listaExp}>{fila.datos?.expedidor || fila.nombre}</div>
                     <div style={s.listaRowBot}>
@@ -268,6 +319,21 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
         </div>
 
         <div style={s.leftFooter}>
+          {selMultiple.length >= 2 && (
+            <button onClick={unirFacturas} style={s.btnUnir}>
+              🔗 Unir {selMultiple.length} páginas en 1 factura
+            </button>
+          )}
+          {selMultiple.length > 0 && selMultiple.length < 2 && (
+            <p style={{ fontSize: '0.72rem', color: '#6B6B6B', marginBottom: '6px', textAlign: 'center' }}>
+              Selecciona al menos 2 páginas para unir
+            </p>
+          )}
+          {selMultiple.length === 0 && (
+            <p style={{ fontSize: '0.7rem', color: '#6B6B6B', marginBottom: '6px' }}>
+              Clic derecho en una factura para marcarla y unir páginas
+            </p>
+          )}
           <div style={s.statsRow}>
             <span style={s.statOk}>{validadas} ✓ validadas</span>
             <span style={s.statPend}>{pendientes} pendientes</span>
@@ -283,11 +349,12 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
       <div style={s.centerCol}>
         {filaSeleccionada?.previewUrl ? (
           filaSeleccionada.archivo?.type === 'application/pdf' ? (
-            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+            <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
               <iframe
                 src={`${filaSeleccionada.previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
                 style={s.visorFrame} title="Factura"
               />
+              {/* Overlay para lupa — no bloquea scroll del iframe */}
               <div
                 style={{ position: 'absolute', inset: 0, cursor: lupa ? 'zoom-out' : 'zoom-in', zIndex: 2, background: 'transparent' }}
                 onClick={e => {
@@ -296,6 +363,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
                   const yPct = (e.clientY - rect.top)  / rect.height * 100
                   setLupa(l => l ? null : { xPct, yPct, url: filaSeleccionada.previewUrl, isPdf: true })
                 }}
+                onWheel={e => { e.stopPropagation() }}
               />
               {lupa?.isPdf && (
                 <div style={{ ...s.lupaCirculo, top: `${Math.max(5, Math.min(lupa.yPct - 22, 50))}%`, left: `${Math.max(5, Math.min(lupa.xPct - 22, 50))}%` }}>
@@ -307,33 +375,25 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
               )}
             </div>
           ) : (
+            // Imagen — scroll nativo con ruedita + lupa con click
             <div
-              ref={el => el && (el._scrollRef = el)}
+              ref={imgWrapRef}
               style={s.visorImgWrap}
-              id="visor-img-wrap"
+              onClick={e => {
+                const img = e.currentTarget.querySelector('img')
+                if (!img) return
+                const rect = img.getBoundingClientRect()
+                const xPct = (e.clientX - rect.left) / rect.width * 100
+                const yPct = (e.clientY - rect.top)  / rect.height * 100
+                setLupa(l => l ? null : { xPct, yPct })
+              }}
             >
               <img
                 src={filaSeleccionada.previewUrl} alt="Factura"
-                style={{ ...s.visorImg, cursor: lupa ? 'zoom-out' : 'zoom-in', userSelect: 'none' }}
-                onClick={e => {
-                  const rect = e.currentTarget.getBoundingClientRect()
-                  const xPct = (e.clientX - rect.left) / rect.width * 100
-                  const yPct = (e.clientY - rect.top)  / rect.height * 100
-                  setLupa(l => l ? null : { xPct, yPct })
-                }}
-                onWheel={e => {
-                  const wrap = document.getElementById('visor-img-wrap')
-                  if (wrap) wrap.scrollTop += e.deltaY
-                }}
+                style={{ ...s.visorImg, cursor: lupa ? 'zoom-out' : 'zoom-in' }}
               />
               {lupa && !lupa.isPdf && (
-                <div
-                  style={{ ...s.lupaCirculo, top: `${Math.max(5, Math.min(lupa.yPct - 22, 50))}%`, left: `${Math.max(5, Math.min(lupa.xPct - 22, 50))}%` }}
-                  onWheel={e => {
-                    const wrap = document.getElementById('visor-img-wrap')
-                    if (wrap) wrap.scrollTop += e.deltaY
-                  }}
-                >
+                <div style={{ ...s.lupaCirculo, top: `${Math.max(5, Math.min(lupa.yPct - 22, 50))}%`, left: `${Math.max(5, Math.min(lupa.xPct - 22, 50))}%` }}>
                   <div style={{
                     position: 'absolute', inset: 0,
                     backgroundImage: `url(${filaSeleccionada.previewUrl})`,
@@ -470,78 +530,76 @@ function BadgeMini({ estado }) {
 const NAV_H = 56
 
 const s = {
-  // Drop zone inicial
-  dropZone:      { border: '2px dashed #D8D4CB', borderRadius: '10px', background: '#fff', padding: '60px 24px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s' },
-  dropZoneActive:{ borderColor: '#1A472A', background: '#E8F5E9' },
-  dropIcon:      { fontSize: '3rem', marginBottom: '12px' },
-  dropTitle:     { fontWeight: 700, fontSize: '1.1rem', marginBottom: '8px' },
-  dropSub:       { fontSize: '0.85rem', color: '#6B6B6B', marginBottom: '18px' },
-  dropBtn:       { background: '#1A472A', color: '#fff', border: 'none', borderRadius: '8px', padding: '11px 24px', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer' },
+  dropZone:       { border: '2px dashed #D8D4CB', borderRadius: '10px', background: '#fff', padding: '60px 24px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s' },
+  dropZoneActive: { borderColor: '#1A472A', background: '#E8F5E9' },
+  dropIcon:       { fontSize: '3rem', marginBottom: '12px' },
+  dropTitle:      { fontWeight: 700, fontSize: '1.1rem', marginBottom: '8px' },
+  dropSub:        { fontSize: '0.85rem', color: '#6B6B6B', marginBottom: '18px' },
+  dropBtn:        { background: '#1A472A', color: '#fff', border: 'none', borderRadius: '8px', padding: '11px 24px', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer' },
+  btnReabrir:     { marginTop: '12px', background: 'transparent', color: '#1A472A', border: '1px solid #1A472A', borderRadius: '8px', padding: '9px 20px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', display: 'block', margin: '12px auto 0' },
 
-  // Visor fullscreen
-  appShell:      { position: 'fixed', top: `${NAV_H}px`, left: 0, right: 0, bottom: 0, display: 'grid', gridTemplateColumns: '240px 1fr 420px', background: '#1a1a1a', zIndex: 50, padding: '8px', gap: '8px' },
+  appShell:       { position: 'fixed', top: `${NAV_H}px`, left: 0, right: 0, bottom: 0, display: 'grid', gridTemplateColumns: '240px 1fr 420px', background: '#1a1a1a', zIndex: 50, padding: '8px', gap: '8px' },
 
-  // Izquierda
-  leftCol:       { display: 'flex', flexDirection: 'column', background: '#F5F3EE', overflow: 'hidden', borderRadius: '8px' },
-  leftHeader:    { padding: '10px 14px', borderBottom: '1px solid #D8D4CB', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff', flexShrink: 0 },
-  leftTitle:     { fontSize: '0.82rem', fontWeight: 700 },
-  leftScroll:    { flex: 1, overflowY: 'auto' },
-  leftFooter:    { padding: '10px 14px', borderTop: '1px solid #D8D4CB', background: '#fff', flexShrink: 0 },
-  colaItem:      { padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '8px', background: '#FFF8E1', borderBottom: '1px solid #EDEAE3', flexShrink: 0 },
-  spinner:       { color: '#F57F17' },
-  colaNombre:    { fontSize: '0.74rem', color: '#6B6B6B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  btnAnadir:     { background: 'transparent', border: '1px solid #D8D4CB', borderRadius: '6px', padding: '4px 10px', fontSize: '0.75rem', cursor: 'pointer' },
-  btnCerrar:     { background: 'transparent', border: '1px solid #D8D4CB', borderRadius: '6px', padding: '4px 8px', fontSize: '0.75rem', cursor: 'pointer', color: '#6B6B6B', fontWeight: 700 },
-  btnReabrir:    { marginTop: '12px', background: '#1A472A', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 20px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', display: 'block', margin: '12px auto 0' },
-  listaItem:     { padding: '10px 14px', borderBottom: '1px solid #EDEAE3', cursor: 'pointer', transition: 'background 0.1s' },
-  listaItemSel:  { background: '#E8F5E9', borderLeft: '3px solid #1A472A' },
-  listaItemOk:   { background: '#F0FFF4', padding: '6px 14px' },
-  listaOkRow:    { display: 'flex', alignItems: 'center', gap: '8px' },
-  listaOkCheck:  { color: '#2E7D32', fontWeight: 700, fontSize: '0.78rem' },
-  listaOkNum:    { flex: 1, fontSize: '0.75rem', fontFamily: 'monospace', color: '#2E7D32', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  listaOkTotal:  { fontSize: '0.75rem', fontWeight: 600, color: '#2E7D32' },
-  listaRowTop:   { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' },
-  listaNum:      { fontSize: '0.78rem', fontFamily: 'monospace', fontWeight: 700 },
-  listaExp:      { fontSize: '0.78rem', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  listaRowBot:   { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  listaFecha:    { fontSize: '0.7rem', color: '#6B6B6B' },
-  listaTotal:    { fontSize: '0.78rem', fontWeight: 600, color: '#1A472A' },
-  statsRow:      { display: 'flex', gap: '10px', marginBottom: '8px' },
-  statOk:        { fontSize: '0.75rem', color: '#2E7D32', fontWeight: 600 },
-  statPend:      { fontSize: '0.75rem', color: '#F57F17' },
-  btnGuardar:    { width: '100%', background: '#1A472A', color: '#fff', border: 'none', borderRadius: '7px', padding: '10px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
+  leftCol:        { display: 'flex', flexDirection: 'column', background: '#F5F3EE', overflow: 'hidden', borderRadius: '8px' },
+  leftHeader:     { padding: '10px 14px', borderBottom: '1px solid #D8D4CB', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff', flexShrink: 0 },
+  leftTitle:      { fontSize: '0.82rem', fontWeight: 700 },
+  leftScroll:     { flex: 1, overflowY: 'auto' },
+  leftFooter:     { padding: '10px 14px', borderTop: '1px solid #D8D4CB', background: '#fff', flexShrink: 0 },
+  colaItem:       { padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '8px', background: '#FFF8E1', borderBottom: '1px solid #EDEAE3', flexShrink: 0 },
+  spinner:        { color: '#F57F17' },
+  colaNombre:     { fontSize: '0.74rem', color: '#6B6B6B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  btnAnadir:      { background: 'transparent', border: '1px solid #D8D4CB', borderRadius: '6px', padding: '4px 10px', fontSize: '0.75rem', cursor: 'pointer' },
+  btnCerrar:      { background: 'transparent', border: '1px solid #D8D4CB', borderRadius: '6px', padding: '4px 8px', fontSize: '0.75rem', cursor: 'pointer', color: '#6B6B6B', fontWeight: 700 },
 
-  // Centro visor
-  centerCol:     { display: 'flex', flexDirection: 'column', background: '#1E1E1E', overflow: 'hidden', borderRadius: '8px', minHeight: 0 },
-  visorFrame:    { width: '100%', height: '100%', border: 'none', display: 'block' },
-  visorImgWrap:  { flex: 1, overflowY: 'scroll', overflowX: 'hidden', display: 'flex', justifyContent: 'center', padding: '24px', alignItems: 'flex-start', position: 'relative', background: '#1E1E1E' },
-  visorImg:      { width: '88%', boxShadow: '0 4px 24px rgba(0,0,0,0.7)', borderRadius: '2px' },
-  visorEmpty:    { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6B6B6B', gap: '10px' },
+  listaItem:      { padding: '10px 14px', borderBottom: '1px solid #EDEAE3', cursor: 'pointer', transition: 'background 0.1s' },
+  listaItemSel:   { background: '#E8F5E9', borderLeft: '3px solid #1A472A' },
+  listaItemOk:    { background: '#F0FFF4', padding: '6px 14px' },
+  listaItemMarcada:{ background: '#E3F2FD', borderLeft: '3px solid #1565C0' },
+  listaOkRow:     { display: 'flex', alignItems: 'center', gap: '8px' },
+  listaOkCheck:   { color: '#2E7D32', fontWeight: 700, fontSize: '0.78rem' },
+  listaOkNum:     { flex: 1, fontSize: '0.75rem', fontFamily: 'monospace', color: '#2E7D32', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  listaOkTotal:   { fontSize: '0.75rem', fontWeight: 600, color: '#2E7D32' },
+  listaRowTop:    { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' },
+  listaNum:       { fontSize: '0.78rem', fontFamily: 'monospace', fontWeight: 700 },
+  listaExp:       { fontSize: '0.78rem', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  listaRowBot:    { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  listaFecha:     { fontSize: '0.7rem', color: '#6B6B6B' },
+  listaTotal:     { fontSize: '0.78rem', fontWeight: 600, color: '#1A472A' },
+  marcadaBadge:   { fontSize: '0.65rem', background: '#1565C0', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: 700 },
+  paginaAviso:    { fontSize: '0.68rem', color: '#E65100', background: '#FFF3E0', borderRadius: '4px', padding: '2px 6px', marginBottom: '4px', display: 'inline-block' },
 
-  // Lupa circular
-  lupaCirculo:   { position: 'absolute', width: '42%', paddingBottom: '42%', borderRadius: '50%', border: '3px solid #1A472A', boxShadow: '0 8px 32px rgba(0,0,0,0.8)', overflow: 'hidden', pointerEvents: 'none', zIndex: 10 },
+  statsRow:       { display: 'flex', gap: '10px', marginBottom: '8px' },
+  statOk:         { fontSize: '0.75rem', color: '#2E7D32', fontWeight: 600 },
+  statPend:       { fontSize: '0.75rem', color: '#F57F17' },
+  btnGuardar:     { width: '100%', background: '#1A472A', color: '#fff', border: 'none', borderRadius: '7px', padding: '10px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
+  btnUnir:        { width: '100%', background: '#1565C0', color: '#fff', border: 'none', borderRadius: '7px', padding: '8px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', marginBottom: '8px' },
 
-  // Derecha editor
-  rightCol:      { display: 'flex', overflow: 'hidden', borderRadius: '8px', background: '#fff' },
-  editorShell:   { display: 'flex', flexDirection: 'column', width: '100%', overflow: 'hidden' },
-  editorTop:     { padding: '10px 14px', borderBottom: '1px solid #D8D4CB', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, background: '#fafafa' },
-  editorScroll:  { flex: 1, overflowY: 'auto', padding: '14px' },
-  editorFooter:  { padding: '12px 14px', borderTop: '1px solid #D8D4CB', display: 'flex', gap: '8px', flexShrink: 0, background: '#fff' },
-  btnOkFull:     { flex: 2, background: '#E8F5E9', color: '#2E7D32', border: '1px solid #A5D6A7', borderRadius: '7px', padding: '11px', fontSize: '0.88rem', fontWeight: 700, cursor: 'pointer' },
-  btnOkActive:   { background: '#2E7D32', color: '#fff', borderColor: '#2E7D32' },
-  btnErrFull:    { flex: 1, background: '#FFF3E0', color: '#E65100', border: '1px solid #FFCC80', borderRadius: '7px', padding: '11px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
+  centerCol:      { display: 'flex', flexDirection: 'column', background: '#1E1E1E', overflow: 'hidden', borderRadius: '8px', minHeight: 0 },
+  visorFrame:     { width: '100%', height: '100%', border: 'none', display: 'block' },
+  visorImgWrap:   { flex: 1, overflowY: 'scroll', overflowX: 'hidden', display: 'flex', justifyContent: 'center', padding: '24px', alignItems: 'flex-start', position: 'relative', background: '#1E1E1E', cursor: 'zoom-in' },
+  visorImg:       { width: '88%', boxShadow: '0 4px 24px rgba(0,0,0,0.7)', borderRadius: '2px' },
+  visorEmpty:     { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6B6B6B', gap: '10px' },
+  lupaCirculo:    { position: 'absolute', width: '42%', paddingBottom: '42%', borderRadius: '50%', border: '3px solid #1A472A', boxShadow: '0 8px 32px rgba(0,0,0,0.8)', overflow: 'hidden', pointerEvents: 'none', zIndex: 10 },
 
-  // Campos
-  fieldGroup:    { marginBottom: '10px' },
-  label:         { display: 'block', fontSize: '0.68rem', fontWeight: 600, color: '#6B6B6B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' },
-  input:         { width: '100%', padding: '7px 9px', border: '1px solid #D8D4CB', borderRadius: '6px', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' },
-  divider:       { borderTop: '1px solid #EDEAE3', margin: '12px 0' },
-  grid2:         { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' },
-  totalBox:      { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#E8F5E9', borderRadius: '6px', padding: '10px 12px', marginTop: '10px' },
-  totalLabel:    { fontSize: '0.78rem', fontWeight: 600, color: '#1A472A' },
-  totalValor:    { fontSize: '1.1rem', fontWeight: 700, color: '#1A472A' },
-  lineaBox:      { background: '#F5F3EE', borderRadius: '6px', padding: '10px', marginBottom: '8px' },
-  lineaTag:      { display: 'inline-block', background: '#1A472A', color: '#fff', borderRadius: '4px', padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700, marginBottom: '8px' },
-  notasBox:      { background: '#FFF8E1', border: '1px solid #FFE082', borderRadius: '6px', padding: '8px 10px', fontSize: '0.78rem', color: '#F57F17', marginTop: '12px' },
-  abonoBadge:    { background: '#FFF3E0', color: '#E65100', border: '1px solid #FFCC80', borderRadius: '4px', padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700 },
+  rightCol:       { display: 'flex', overflow: 'hidden', borderRadius: '8px', background: '#fff' },
+  editorShell:    { display: 'flex', flexDirection: 'column', width: '100%', overflow: 'hidden' },
+  editorTop:      { padding: '10px 14px', borderBottom: '1px solid #D8D4CB', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, background: '#fafafa' },
+  editorScroll:   { flex: 1, overflowY: 'auto', padding: '14px' },
+  editorFooter:   { padding: '12px 14px', borderTop: '1px solid #D8D4CB', display: 'flex', gap: '8px', flexShrink: 0, background: '#fff' },
+  btnOkFull:      { flex: 2, background: '#E8F5E9', color: '#2E7D32', border: '1px solid #A5D6A7', borderRadius: '7px', padding: '11px', fontSize: '0.88rem', fontWeight: 700, cursor: 'pointer' },
+  btnOkActive:    { background: '#2E7D32', color: '#fff', borderColor: '#2E7D32' },
+  btnErrFull:     { flex: 1, background: '#FFF3E0', color: '#E65100', border: '1px solid #FFCC80', borderRadius: '7px', padding: '11px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
+
+  fieldGroup:     { marginBottom: '10px' },
+  label:          { display: 'block', fontSize: '0.68rem', fontWeight: 600, color: '#6B6B6B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' },
+  input:          { width: '100%', padding: '7px 9px', border: '1px solid #D8D4CB', borderRadius: '6px', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' },
+  divider:        { borderTop: '1px solid #EDEAE3', margin: '12px 0' },
+  grid2:          { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' },
+  totalBox:       { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#E8F5E9', borderRadius: '6px', padding: '10px 12px', marginTop: '10px' },
+  totalLabel:     { fontSize: '0.78rem', fontWeight: 600, color: '#1A472A' },
+  totalValor:     { fontSize: '1.1rem', fontWeight: 700, color: '#1A472A' },
+  lineaBox:       { background: '#F5F3EE', borderRadius: '6px', padding: '10px', marginBottom: '8px' },
+  lineaTag:       { display: 'inline-block', background: '#1A472A', color: '#fff', borderRadius: '4px', padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700, marginBottom: '8px' },
+  notasBox:       { background: '#FFF8E1', border: '1px solid #FFE082', borderRadius: '6px', padding: '8px 10px', fontSize: '0.78rem', color: '#F57F17', marginTop: '12px' },
+  abonoBadge:     { background: '#FFF3E0', color: '#E65100', border: '1px solid #FFCC80', borderRadius: '4px', padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700 },
 }

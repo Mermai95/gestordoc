@@ -16,6 +16,7 @@ INSTRUCCIONES CRÍTICAS:
 5. Si es ABONO o RECTIFICATIVA (importes negativos, dice "abono", "nota de crédito", "rectificativa"), pon tipo "abono" e importes en negativo.
 6. El campo "deducible" = igual que "cuota_iva" salvo que indique explícitamente que no es deducible.
 7. Si la página está en blanco o no es una factura, responde: {"es_factura": false}
+7. Si ves que la factura indica "Página X de Y" o "Pág. X/Y" o similar, incluye en "notas": "Página X de Y — puede necesitar unirse con otras páginas".
 
 FORMATOS ESPECIALES DE IVA:
 - Makro usa códigos: 1=10%, 2=21%, 3=21%, 5=4% — tradúcelos al porcentaje real.
