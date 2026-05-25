@@ -12,6 +12,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
   const [seleccionId, setSeleccionId] = useState(null)
   const [guardando,   setGuardando]   = useState(false)
   const [lupa,        setLupa]        = useState(null)
+  const [visorAbierto, setVisorAbierto] = useState(true)
 
   const filaSeleccionada = filas.find(f => f.id === seleccionId) || filas[0] || null
   const visorActivo = filas.length > 0 || cola.length > 0
@@ -63,6 +64,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
           if (f.length === 0) setSeleccionId(id)
           return nuevas
         })
+        setVisorAbierto(true)
       } catch (err) {
         console.error(err)
         setCola(c => c.map(x => x.id === id ? { ...x, estado: 'error' } : x))
@@ -180,8 +182,8 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
   const validadas  = filas.filter(f => f.estado === 'validada').length
   const pendientes = filas.filter(f => f.estado === 'pendiente').length
 
-  // ── PASO 1: Drop zone inicial — antes de subir facturas ───────────────────
-  if (!visorActivo) {
+  // ── PASO 1: Drop zone inicial o visor cerrado ─────────────────────────────
+  if (!visorActivo || !visorAbierto) {
     return (
       <div
         style={{ ...s.dropZone, ...(dragOver ? s.dropZoneActive : {}) }}
@@ -195,6 +197,14 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
         <button style={s.dropBtn} onClick={e => { e.stopPropagation(); fileInputRef.current.click() }}>
           Seleccionar archivos del ordenador
         </button>
+        {filas.length > 0 && (
+          <button
+            onClick={e => { e.stopPropagation(); setVisorAbierto(true) }}
+            style={s.btnReabrir}
+          >
+            📋 Volver a las {filas.length} facturas cargadas
+          </button>
+        )}
       </div>
     )
   }
@@ -207,9 +217,10 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
       <div style={s.leftCol}>
         <div style={s.leftHeader}>
           <span style={s.leftTitle}>Facturas ({filas.length})</span>
-          <div style={{ display: 'flex', gap: '6px' }}>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
             <input ref={fileInputRef} type="file" accept="image/*,.pdf" multiple style={{ display: 'none' }} onChange={onFileChange} />
             <button onClick={() => fileInputRef.current.click()} style={s.btnAnadir}>+ Añadir</button>
+            <button onClick={() => setVisorAbierto(false)} style={s.btnCerrar} title="Cerrar visor">✕</button>
           </div>
         </div>
 
@@ -296,19 +307,33 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
               )}
             </div>
           ) : (
-            <div style={s.visorImgWrap}>
+            <div
+              ref={el => el && (el._scrollRef = el)}
+              style={s.visorImgWrap}
+              id="visor-img-wrap"
+            >
               <img
                 src={filaSeleccionada.previewUrl} alt="Factura"
-                style={{ ...s.visorImg, cursor: lupa ? 'zoom-out' : 'zoom-in' }}
+                style={{ ...s.visorImg, cursor: lupa ? 'zoom-out' : 'zoom-in', userSelect: 'none' }}
                 onClick={e => {
                   const rect = e.currentTarget.getBoundingClientRect()
                   const xPct = (e.clientX - rect.left) / rect.width * 100
                   const yPct = (e.clientY - rect.top)  / rect.height * 100
                   setLupa(l => l ? null : { xPct, yPct })
                 }}
+                onWheel={e => {
+                  const wrap = document.getElementById('visor-img-wrap')
+                  if (wrap) wrap.scrollTop += e.deltaY
+                }}
               />
               {lupa && !lupa.isPdf && (
-                <div style={{ ...s.lupaCirculo, top: `${Math.max(5, Math.min(lupa.yPct - 22, 50))}%`, left: `${Math.max(5, Math.min(lupa.xPct - 22, 50))}%` }}>
+                <div
+                  style={{ ...s.lupaCirculo, top: `${Math.max(5, Math.min(lupa.yPct - 22, 50))}%`, left: `${Math.max(5, Math.min(lupa.xPct - 22, 50))}%` }}
+                  onWheel={e => {
+                    const wrap = document.getElementById('visor-img-wrap')
+                    if (wrap) wrap.scrollTop += e.deltaY
+                  }}
+                >
                   <div style={{
                     position: 'absolute', inset: 0,
                     backgroundImage: `url(${filaSeleccionada.previewUrl})`,
@@ -466,6 +491,8 @@ const s = {
   spinner:       { color: '#F57F17' },
   colaNombre:    { fontSize: '0.74rem', color: '#6B6B6B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   btnAnadir:     { background: 'transparent', border: '1px solid #D8D4CB', borderRadius: '6px', padding: '4px 10px', fontSize: '0.75rem', cursor: 'pointer' },
+  btnCerrar:     { background: 'transparent', border: '1px solid #D8D4CB', borderRadius: '6px', padding: '4px 8px', fontSize: '0.75rem', cursor: 'pointer', color: '#6B6B6B', fontWeight: 700 },
+  btnReabrir:    { marginTop: '12px', background: '#1A472A', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 20px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', display: 'block', margin: '12px auto 0' },
   listaItem:     { padding: '10px 14px', borderBottom: '1px solid #EDEAE3', cursor: 'pointer', transition: 'background 0.1s' },
   listaItemSel:  { background: '#E8F5E9', borderLeft: '3px solid #1A472A' },
   listaItemOk:   { background: '#F0FFF4', padding: '6px 14px' },
