@@ -211,7 +211,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
         base_imponible:   baseTotal.toFixed(2),
         cuota_iva:        cuotaTotal.toFixed(2),
         deducible:        deducibleTotal.toFixed(2),
-        confianza:        'media',
+        confianza:        paginaConTotales.datos?.confianza || mejorValor('confianza') || 'media',
         notas:            '',
       }
     }
@@ -424,6 +424,10 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
             <div
               ref={imgWrapRef}
               style={s.visorImgWrap}
+              onWheel={e => {
+                e.preventDefault()
+                if (imgWrapRef.current) imgWrapRef.current.scrollTop += e.deltaY
+              }}
               onMouseMove={e => {
                 if (!lupa) return
                 const rect = e.currentTarget.getBoundingClientRect()
@@ -631,7 +635,7 @@ const s = {
 
   centerCol:      { display: 'flex', flexDirection: 'column', background: '#1E1E1E', overflow: 'hidden', borderRadius: '8px', minHeight: 0, position: 'relative' },
   visorFrame:     { width: '100%', height: '100%', border: 'none', display: 'block' },
-  visorImgWrap:   { position: 'absolute', inset: 0, overflowY: 'scroll', overflowX: 'hidden', display: 'flex', justifyContent: 'center', padding: '24px', alignItems: 'flex-start', background: '#1E1E1E', cursor: 'zoom-in' },
+  visorImgWrap:   { position: 'absolute', inset: 0, overflow: 'hidden', overflowY: 'auto', display: 'flex', justifyContent: 'center', padding: '24px', alignItems: 'flex-start', background: '#1E1E1E', cursor: 'zoom-in' },
   visorImg:       { width: '88%', boxShadow: '0 4px 24px rgba(0,0,0,0.7)', borderRadius: '2px' },
   visorEmpty:     { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6B6B6B', gap: '10px' },
   lupaCirculo:    { position: 'absolute', width: '42%', paddingBottom: '42%', borderRadius: '50%', border: '3px solid #1A472A', boxShadow: '0 8px 32px rgba(0,0,0,0.8)', overflow: 'hidden', pointerEvents: 'none', zIndex: 10 },
