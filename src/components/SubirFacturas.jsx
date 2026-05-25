@@ -153,17 +153,25 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
     if (selMultiple.length < 2) return
     const seleccionadas = filas.filter(f => selMultiple.includes(f.id))
 
-    // La página "base" es la que tiene más campos completos
-    const base = seleccionadas.reduce((mejor, f) => {
-      const campos = Object.values(f.datos || {}).filter(v => v && v !== '0' && v !== 0 && v !== '').length
-      const camposMejor = Object.values(mejor.datos || {}).filter(v => v && v !== '0' && v !== 0 && v !== '').length
-      return campos > camposMejor ? f : mejor
-    })
+    // Combinar inteligentemente: cada campo del que lo tenga mejor
+    const base = seleccionadas[0]
 
-    // Sumar bases e IVAs
-    const baseTotal      = seleccionadas.reduce((sum, f) => sum + (parseFloat(f.datos?.base_imponible) || 0), 0)
-    const cuotaTotal     = seleccionadas.reduce((sum, f) => sum + (parseFloat(f.datos?.cuota_iva) || 0), 0)
-    const deducibleTotal = seleccionadas.reduce((sum, f) => sum + (parseFloat(f.datos?.deducible) || 0), 0)
+    function mejorValor(campo) {
+      for (const f of seleccionadas) {
+        const v = f.datos?.[campo]
+        if (v && v !== '0' && v !== 0 && v !== '' && v !== '0.00') return v
+      }
+      return base.datos?.[campo]
+    }
+
+    // Los totales van en la última página con datos fiscales
+    const paginaConTotales = [...seleccionadas].reverse().find(f =>
+      parseFloat(f.datos?.base_imponible) > 0
+    ) || base
+
+    const baseTotal      = parseFloat(paginaConTotales.datos?.base_imponible) || 0
+    const cuotaTotal     = parseFloat(paginaConTotales.datos?.cuota_iva) || 0
+    const deducibleTotal = parseFloat(paginaConTotales.datos?.deducible) || 0
 
     // Fusionar PDFs en un solo archivo para poder scrollear ambas páginas
     let previewUrl = base.previewUrl
@@ -191,11 +199,20 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
       archivo: archivoUnido,
       previewUrl,
       datos: {
-        ...base.datos,
-        base_imponible: baseTotal.toFixed(2),
-        cuota_iva:      cuotaTotal.toFixed(2),
-        deducible:      deducibleTotal.toFixed(2),
-        notas:          base.datos?.notas ? base.datos.notas.replace(/Página \d+ de \d+.*?—\s*/g, '') : '',
+        num_factura:      mejorValor('num_factura'),
+        fecha_expedicion: mejorValor('fecha_expedicion'),
+        fecha_operacion:  mejorValor('fecha_operacion'),
+        concepto:         mejorValor('concepto'),
+        nif_expedidor:    mejorValor('nif_expedidor'),
+        expedidor:        mejorValor('expedidor'),
+        tipo:             mejorValor('tipo') || 'factura',
+        pct_iva:          paginaConTotales.datos?.pct_iva || mejorValor('pct_iva'),
+        lineas_extra:     paginaConTotales.datos?.lineas_extra || base.datos?.lineas_extra || [],
+        base_imponible:   baseTotal.toFixed(2),
+        cuota_iva:        cuotaTotal.toFixed(2),
+        deducible:        deducibleTotal.toFixed(2),
+        confianza:        'media',
+        notas:            '',
       }
     }
 
@@ -403,29 +420,39 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
               )}
             </div>
           ) : (
-            // Imagen — scroll nativo con ruedita + lupa con click
+            // Imagen — scroll nativo + lupa via onMouseMove sin overlay
             <div
               ref={imgWrapRef}
               style={s.visorImgWrap}
+              onMouseMove={e => {
+                if (!lupa) return
+                const rect = e.currentTarget.getBoundingClientRect()
+                const xPct = Math.max(5, Math.min((e.clientX - rect.left) / rect.width * 100, 95))
+                const yPct = Math.max(5, Math.min((e.clientY - rect.top + e.currentTarget.scrollTop) / e.currentTarget.scrollHeight * 100, 95))
+                setLupa({ activa: true, xPct, yPct, x: e.clientX - rect.left, y: e.clientY - rect.top })
+              }}
               onClick={e => {
-                const img = e.currentTarget.querySelector('img')
-                if (!img) return
-                const rect = img.getBoundingClientRect()
-                const xPct = (e.clientX - rect.left) / rect.width * 100
-                const yPct = (e.clientY - rect.top)  / rect.height * 100
-                setLupa(l => l ? null : { xPct, yPct })
+                setLupa(l => l?.activa ? null : { activa: true, xPct: 50, yPct: 50, x: 0, y: 0 })
               }}
             >
               <img
                 src={filaSeleccionada.previewUrl} alt="Factura"
-                style={{ ...s.visorImg, cursor: lupa ? 'zoom-out' : 'zoom-in' }}
+                style={{ ...s.visorImg, cursor: lupa?.activa ? 'zoom-out' : 'zoom-in' }}
               />
-              {lupa && !lupa.isPdf && (
-                <div style={{ ...s.lupaCirculo, top: `${Math.max(5, Math.min(lupa.yPct - 22, 50))}%`, left: `${Math.max(5, Math.min(lupa.xPct - 22, 50))}%` }}>
+              {lupa?.activa && (
+                <div style={{
+                  ...s.lupaCirculo,
+                  position: 'fixed',
+                  top: `${Math.max(80, Math.min(lupa.y + (imgWrapRef.current?.getBoundingClientRect().top || 0) - 110, window.innerHeight - 230))}px`,
+                  left: `${Math.max(80, Math.min(lupa.x + (imgWrapRef.current?.getBoundingClientRect().left || 0) - 110, window.innerWidth - 230))}px`,
+                  width: '220px',
+                  paddingBottom: '220px',
+                  pointerEvents: 'none',
+                }}>
                   <div style={{
                     position: 'absolute', inset: 0,
                     backgroundImage: `url(${filaSeleccionada.previewUrl})`,
-                    backgroundSize: '350%',
+                    backgroundSize: '400%',
                     backgroundPosition: `${lupa.xPct}% ${lupa.yPct}%`,
                     backgroundRepeat: 'no-repeat',
                   }} />
@@ -449,7 +476,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
             onChange={(campo, valor) => editarCampo(filaSeleccionada.id, campo, valor)}
             onChangeLinea={(idx, campo, valor) => editarLineaExtra(filaSeleccionada.id, idx, campo, valor)}
             onValidar={() => setEstadoFila(filaSeleccionada.id, 'validada')}
-            onError={()   => setEstadoFila(filaSeleccionada.id, 'error')}
+            onError={()   => setFilas(f => f.filter(x => x.id !== filaSeleccionada.id))}
           />
         ) : (
           <div style={s.visorEmpty}>
@@ -530,7 +557,7 @@ function EditorFactura({ fila, onChange, onChangeLinea, onValidar, onError }) {
       </div>
 
       <div style={s.editorFooter}>
-        <button onClick={onError} style={s.btnErrFull}>✗ Error</button>
+        <button onClick={onError} style={s.btnErrFull}>🗑 Eliminar</button>
         <button onClick={onValidar} style={{ ...s.btnOkFull, ...(isValidada ? s.btnOkActive : {}) }}>
           ✓ {isValidada ? 'Validada ✓' : 'Validar factura'}
         </button>
