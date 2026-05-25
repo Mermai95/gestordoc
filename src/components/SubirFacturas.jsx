@@ -20,10 +20,13 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
   const visorActivo = filas.length > 0 || cola.length > 0
 
   useEffect(() => {
-    if (visorActivo) document.body.style.overflow = 'hidden'
-    else document.body.style.overflow = ''
+    if (visorActivo && visorAbierto) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
     return () => { document.body.style.overflow = '' }
-  }, [visorActivo])
+  }, [visorActivo, visorAbierto])
 
   function onDragOver(e)   { e.preventDefault(); setDragOver(true) }
   function onDragLeave()   { setDragOver(false) }
@@ -146,7 +149,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
     setSelMultiple(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
   }
 
-  function unirFacturas() {
+  async function unirFacturas() {
     if (selMultiple.length < 2) return
     const seleccionadas = filas.filter(f => selMultiple.includes(f.id))
 
@@ -157,13 +160,36 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
       return campos > camposMejor ? f : mejor
     })
 
-    // Sumar bases e IVAs de todas las páginas
-    const baseTotal     = seleccionadas.reduce((sum, f) => sum + (parseFloat(f.datos?.base_imponible) || 0), 0)
-    const cuotaTotal    = seleccionadas.reduce((sum, f) => sum + (parseFloat(f.datos?.cuota_iva) || 0), 0)
+    // Sumar bases e IVAs
+    const baseTotal      = seleccionadas.reduce((sum, f) => sum + (parseFloat(f.datos?.base_imponible) || 0), 0)
+    const cuotaTotal     = seleccionadas.reduce((sum, f) => sum + (parseFloat(f.datos?.cuota_iva) || 0), 0)
     const deducibleTotal = seleccionadas.reduce((sum, f) => sum + (parseFloat(f.datos?.deducible) || 0), 0)
+
+    // Fusionar PDFs en un solo archivo para poder scrollear ambas páginas
+    let previewUrl = base.previewUrl
+    let archivoUnido = base.archivo
+    try {
+      const pdfUnido = await PDFDocument.create()
+      for (const fila of seleccionadas) {
+        try {
+          const buf = await fila.archivo.arrayBuffer()
+          const doc = await PDFDocument.load(buf)
+          const pages = await pdfUnido.copyPages(doc, doc.getPageIndices())
+          pages.forEach(p => pdfUnido.addPage(p))
+        } catch (e) { console.warn('No se pudo fusionar página:', e) }
+      }
+      const pdfBytes = await pdfUnido.save()
+      const pdfBlob  = new Blob([pdfBytes], { type: 'application/pdf' })
+      previewUrl  = URL.createObjectURL(pdfBlob)
+      archivoUnido = new File([pdfBlob], base.nombre, { type: 'application/pdf' })
+    } catch (e) {
+      console.warn('Error fusionando PDFs:', e)
+    }
 
     const filaUnida = {
       ...base,
+      archivo: archivoUnido,
+      previewUrl,
       datos: {
         ...base.datos,
         base_imponible: baseTotal.toFixed(2),
@@ -174,10 +200,10 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
     }
 
     setFilas(f => {
-      const sinSeleccionadas = f.filter(x => !selMultiple.includes(x.id))
       const idxBase = f.findIndex(x => x.id === base.id)
-      sinSeleccionadas.splice(idxBase, 0, filaUnida)
-      return sinSeleccionadas
+      const nuevas  = f.filter(x => !selMultiple.includes(x.id))
+      nuevas.splice(Math.min(idxBase, nuevas.length), 0, filaUnida)
+      return nuevas
     })
     setSeleccionId(base.id)
     setSelMultiple([])
@@ -280,11 +306,13 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
 
             return (
               <div key={fila.id}
-                onClick={() => {
-                  if (selMultiple.length > 0) toggleSelMultiple(fila.id)
-                  else { setSeleccionId(fila.id); setLupa(null) }
+                onClick={e => {
+                  if (e.metaKey || e.ctrlKey) {
+                    toggleSelMultiple(fila.id)
+                  } else {
+                    setSeleccionId(fila.id); setLupa(null)
+                  }
                 }}
-                onContextMenu={e => { e.preventDefault(); toggleSelMultiple(fila.id) }}
                 style={{ ...s.listaItem, ...(isSelected ? s.listaItemSel : {}), ...(isValidada && !isSelected ? s.listaItemOk : {}), ...(isMarcada ? s.listaItemMarcada : {}) }}
               >
                 {/* Indicador de paginación */}
@@ -331,7 +359,7 @@ export default function SubirFacturas({ clienteId, onFacturasGuardadas }) {
           )}
           {selMultiple.length === 0 && (
             <p style={{ fontSize: '0.7rem', color: '#6B6B6B', marginBottom: '6px' }}>
-              Clic derecho en una factura para marcarla y unir páginas
+              Cmd+clic (Mac) o Ctrl+clic (Win) para marcar y unir páginas
             </p>
           )}
           <div style={s.statsRow}>
@@ -574,9 +602,9 @@ const s = {
   btnGuardar:     { width: '100%', background: '#1A472A', color: '#fff', border: 'none', borderRadius: '7px', padding: '10px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
   btnUnir:        { width: '100%', background: '#1565C0', color: '#fff', border: 'none', borderRadius: '7px', padding: '8px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', marginBottom: '8px' },
 
-  centerCol:      { display: 'flex', flexDirection: 'column', background: '#1E1E1E', overflow: 'hidden', borderRadius: '8px', minHeight: 0 },
+  centerCol:      { display: 'flex', flexDirection: 'column', background: '#1E1E1E', overflow: 'hidden', borderRadius: '8px', minHeight: 0, position: 'relative' },
   visorFrame:     { width: '100%', height: '100%', border: 'none', display: 'block' },
-  visorImgWrap:   { flex: 1, overflowY: 'scroll', overflowX: 'hidden', display: 'flex', justifyContent: 'center', padding: '24px', alignItems: 'flex-start', position: 'relative', background: '#1E1E1E', cursor: 'zoom-in' },
+  visorImgWrap:   { position: 'absolute', inset: 0, overflowY: 'scroll', overflowX: 'hidden', display: 'flex', justifyContent: 'center', padding: '24px', alignItems: 'flex-start', background: '#1E1E1E', cursor: 'zoom-in' },
   visorImg:       { width: '88%', boxShadow: '0 4px 24px rgba(0,0,0,0.7)', borderRadius: '2px' },
   visorEmpty:     { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6B6B6B', gap: '10px' },
   lupaCirculo:    { position: 'absolute', width: '42%', paddingBottom: '42%', borderRadius: '50%', border: '3px solid #1A472A', boxShadow: '0 8px 32px rgba(0,0,0,0.8)', overflow: 'hidden', pointerEvents: 'none', zIndex: 10 },
