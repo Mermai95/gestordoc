@@ -1,4 +1,6 @@
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -96,24 +98,63 @@ serve(async (req) => {
       })
     }
 
-    const formData = await req.formData()
-    const archivo  = formData.get('archivo') as File
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    )
 
-    if (!archivo) {
-      return new Response(JSON.stringify({ error: 'No se recibió archivo' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    const contentType = req.headers.get('content-type') || ''
+    let base64: string
+    let mediaType = 'application/pdf'
+    let archivoUrl: string | null = null
+
+    if (contentType.includes('application/json')) {
+      const body = await req.json()
+      base64 = body.pdf_base64
+
+      try {
+        const binaryStr = atob(base64)
+        const bytes = new Uint8Array(binaryStr.length)
+        for (let i = 0; i < binaryStr.length; i++) {
+          bytes[i] = binaryStr.charCodeAt(i)
+        }
+        const timestamp = Date.now()
+        const rutaStorage = `email/${timestamp}.pdf`
+        const { error: uploadError } = await supabaseAdmin.storage
+          .from('facturas')
+          .upload(rutaStorage, bytes, {
+            contentType: 'application/pdf',
+            upsert: false,
+          })
+        if (uploadError) {
+          console.error('Error subiendo a Storage:', uploadError)
+        } else {
+          archivoUrl = rutaStorage
+        }
+      } catch (storageErr) {
+        console.error('Error procesando Storage:', storageErr)
+      }
+
+    } else {
+      const formData = await req.formData()
+      const archivo = formData.get('archivo') as File
+      if (!archivo) {
+        return new Response(JSON.stringify({ error: 'No se recibió archivo' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      const buffer = await archivo.arrayBuffer()
+      const bytes = new Uint8Array(buffer)
+      const binary = bytes.reduce((acc, b) => acc + String.fromCharCode(b), '')
+      base64 = btoa(binary)
+      mediaType = archivo.type
     }
 
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
     if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY no configurada')
 
-    const buffer = await archivo.arrayBuffer()
-    const bytes  = new Uint8Array(buffer)
-    const binary = bytes.reduce((acc, b) => acc + String.fromCharCode(b), '')
-    const base64 = btoa(binary)
-    const isPdf  = archivo.type === 'application/pdf'
+    const isPdf = mediaType === 'application/pdf'
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -130,7 +171,7 @@ serve(async (req) => {
           content: [
             {
               type: isPdf ? 'document' : 'image',
-              source: { type: 'base64', media_type: archivo.type, data: base64 },
+              source: { type: 'base64', media_type: mediaType, data: base64 },
             },
             { type: 'text', text: PROMPT },
           ],
@@ -138,10 +179,14 @@ serve(async (req) => {
       }),
     })
 
-    const data   = await response.json()
-    const texto  = data.content?.map((i: any) => i.text || '').join('') || ''
+    const data = await response.json()
+    const texto = data.content?.map((i: any) => i.text || '').join('') || ''
     const limpio = texto.replace(/```json|```/g, '').trim()
     const parsed = JSON.parse(limpio)
+
+    if (archivoUrl) {
+      parsed.archivo_url = archivoUrl
+    }
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

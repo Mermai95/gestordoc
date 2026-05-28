@@ -3,15 +3,17 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { exportarA3 } from '../lib/exportarA3'
 import SubirFacturas from '../components/SubirFacturas'
+import RevisarPendientes from '../components/RevisarPendientes'
 
 export default function Facturas() {
   const { clienteId } = useParams()
   const navigate      = useNavigate()
 
-  const [cliente,       setCliente]       = useState(null)
-  const [facturas,      setFacturas]      = useState([])
-  const [loading,       setLoading]       = useState(true)
-  const [mostrarSubida, setMostrarSubida] = useState(false)
+  const [cliente,        setCliente]        = useState(null)
+  const [facturas,       setFacturas]       = useState([])
+  const [loading,        setLoading]        = useState(true)
+  const [mostrarSubida,  setMostrarSubida]  = useState(false)
+  const [mostrarRevisar, setMostrarRevisar] = useState(false)
 
   useEffect(() => {
     fetchCliente()
@@ -48,8 +50,6 @@ export default function Facturas() {
       nombreEmpresa: cliente?.nombre ?? '',
       periodoInicio: '01 Ene',
       periodoFin: `31 Dic ${new Date().getFullYear()}`,
-      
-      
     })
   }
 
@@ -73,9 +73,18 @@ export default function Facturas() {
           <span style={s.nif}>{cliente.nif_cif}</span>
         </div>
         <div style={s.headerActions}>
-          <button onClick={handleExportar} disabled={validadas.length === 0} style={{ ...s.btnSecondary, opacity: validadas.length === 0 ? 0.4 : 1 }}>
+          <button
+            onClick={handleExportar}
+            disabled={validadas.length === 0}
+            style={{ ...s.btnSecondary, opacity: validadas.length === 0 ? 0.4 : 1 }}
+          >
             ⬇ Exportar Excel A3 ({validadas.length})
           </button>
+          {pendientes.length > 0 && (
+            <button onClick={() => setMostrarRevisar(true)} style={s.btnPendiente}>
+              ● Revisar pendientes ({pendientes.length})
+            </button>
+          )}
           <button onClick={() => setMostrarSubida(v => !v)} style={s.btnPrimary}>
             {mostrarSubida ? '✕ Cerrar' : '+ Subir facturas'}
           </button>
@@ -125,6 +134,14 @@ export default function Facturas() {
           </table>
         </div>
       )}
+
+      {mostrarRevisar && (
+        <RevisarPendientes
+          clienteId={clienteId}
+          onCerrar={() => { setMostrarRevisar(false); fetchFacturas() }}
+          onValidada={fetchFacturas}
+        />
+      )}
     </div>
   )
 }
@@ -159,6 +176,7 @@ const s = {
   headerActions: { display: 'flex', gap: '10px' },
   btnPrimary:    { background: '#1A472A', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
   btnSecondary:  { background: '#fff', color: '#1C1C1C', border: '1px solid #D8D4CB', borderRadius: '8px', padding: '10px 18px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
+  btnPendiente:  { background: '#F57F17', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
   statsRow:      { display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' },
   subidaPanel:   { background: '#F5F3EE', border: '1px solid #D8D4CB', borderRadius: '10px', padding: '24px', marginBottom: '28px' },
   empty:         { textAlign: 'center', padding: '60px 24px', color: '#6B6B6B' },
