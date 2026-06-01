@@ -84,25 +84,23 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   }, [cols])
 
   // Resize de columna por índice
-  const onResizeStart = useCallback((e, idx) => {
+const onResizeStart = useCallback((e, idx) => {
     e.preventDefault()
     e.stopPropagation()
-    resizingRef.current = { idx, startX: e.clientX, startW: cols[idx].w }
+    const startX = e.clientX
+    const startW = cols[idx].w
 
     function onMove(ev) {
-      if (!resizingRef.current) return
-      const { idx: i, startX, startW } = resizingRef.current
       const newW = Math.max(40, startW + (ev.clientX - startX))
-      setCols(cs => { const n = [...cs]; n[i] = { ...n[i], w: newW }; return n })
+      setCols(cs => { const n = [...cs]; n[idx] = { ...n[idx], w: newW }; return n })
     }
     function onUp() {
-      resizingRef.current = null
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
-      document.body.style.cursor = ''
+      document.body.style.cursor    = ''
       document.body.style.userSelect = ''
     }
-    document.body.style.cursor = 'col-resize'
+    document.body.style.cursor    = 'col-resize'
     document.body.style.userSelect = 'none'
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
@@ -549,7 +547,7 @@ const s = {
   listaBox:   { flex: '0 0 40%', overflowX: 'auto', overflowY: 'auto', background: '#fff', borderBottom: '2px solid #C8C4BC' },
   tabla:      { borderCollapse: 'collapse', fontSize: '0.83rem', tableLayout: 'fixed' },
   th:         { position: 'sticky', top: 0, padding: '7px 10px', textAlign: 'left', fontSize: '0.67rem', fontWeight: 700, color: '#5A5A5A', textTransform: 'uppercase', letterSpacing: '0.4px', background: '#DEDAD3', borderBottom: '1px solid #C8C4BC', zIndex: 1, userSelect: 'none' },
-  resizer:    { position: 'absolute', top: 0, right: 0, width: '8px', height: '100%', cursor: 'col-resize', background: 'transparent', zIndex: 2, borderRight: '2px solid transparent' },
+  resizer: { position: 'absolute', top: 0, right: '-4px', width: '8px', height: '100%', cursor: 'col-resize', background: 'transparent', zIndex: 10 },
   tr:         { cursor: 'pointer', borderBottom: '1px solid #EDEAE3' },
   trSel:      { background: '#C9E8F5' },
   trAviso:    { background: '#FFF3E0' },
