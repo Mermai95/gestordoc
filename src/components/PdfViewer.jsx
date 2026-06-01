@@ -5,16 +5,37 @@ const MIN_ZOOM = 0.25
 const MAX_ZOOM = 5
 
 export default function PdfViewer({ url }) {
-  const scrollRef    = useRef(null)
-  const wrapperRef   = useRef(null)
+  const containerRef = useRef(null)  // div exterior — overflow:hidden, NO scroll
+  const wrapperRef   = useRef(null)  // div interior — se mueve con transform
   const pdfRef       = useRef(null)
   const baseSizesRef = useRef([])
-  const zoomRef      = useRef(1)
+  const stateRef     = useRef({ zoom: 1, x: 0, y: 0 })  // estado sin re-render
   const draggingRef  = useRef(false)
-  const dragStartRef = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 })
-  const [zoom,     setZoom]     = useState(1)
+  const dragStartRef = useRef({ mx: 0, my: 0, ox: 0, oy: 0 })
+  const [zoom, setZoom] = useState(1)
   const [cargando, setCargando] = useState(true)
   const [error,    setError]    = useState(null)
+
+  function applyTransform() {
+    const w = wrapperRef.current
+    if (!w) return
+    const { zoom: z, x, y } = stateRef.current
+    w.style.transform = `translate(${x}px, ${y}px) scale(${z})`
+    w.style.transformOrigin = '0 0'
+  }
+
+  function applyZoom(newZoom, pivotX, pivotY) {
+    // pivotX/Y en coordenadas del contenedor
+    const old  = stateRef.current
+    const factor = newZoom / old.zoom
+    stateRef.current = {
+      zoom: newZoom,
+      x: pivotX - factor * (pivotX - old.x),
+      y: pivotY - factor * (pivotY - old.y),
+    }
+    setZoom(newZoom)
+    applyTransform()
+  }
 
   const renderizarTodo = useCallback(async (pdf) => {
     const wrapper = wrapperRef.current
@@ -38,42 +59,33 @@ export default function PdfViewer({ url }) {
       canvas.style.marginBottom  = '16px'
       canvas.style.boxShadow     = '0 4px 16px rgba(0,0,0,0.4)'
       canvas.style.background    = '#fff'
-      canvas.style.pointerEvents = 'none'  // que el drag funcione sobre el canvas
+      canvas.style.pointerEvents = 'none'
       wrapper.appendChild(canvas)
 
       const ctx = canvas.getContext('2d')
       await page.render({ canvasContext: ctx, viewport: vp }).promise
     }
 
-    const scrollEl = scrollRef.current
-    if (scrollEl && baseSizesRef.current[0]) {
-      const containerW = scrollEl.clientWidth - 32
-      const pageW      = baseSizesRef.current[0].w
-      const fitZoom    = Math.min(1, containerW / pageW)
-      zoomRef.current  = fitZoom
-      setZoom(fitZoom)
-      aplicarZoom(fitZoom)
+    // Zoom inicial para que el PDF entre en el contenedor
+    const container = containerRef.current
+    if (container && baseSizesRef.current[0]) {
+      const cw     = container.clientWidth  - 32
+      const ch     = container.clientHeight - 32
+      const { w, h } = baseSizesRef.current[0]
+      const fitZ   = Math.min(1, cw / w, ch / h)
+      stateRef.current = { zoom: fitZ, x: 16, y: 16 }
+      setZoom(fitZ)
+      applyTransform()
     }
     setCargando(false)
   }, [])
 
-  function aplicarZoom(z) {
-    const wrapper = wrapperRef.current
-    if (!wrapper) return
-    const canvases = wrapper.querySelectorAll('canvas')
-    canvases.forEach((c, i) => {
-      const size = baseSizesRef.current[i]
-      if (size) {
-        c.style.width  = (size.w * z) + 'px'
-        c.style.height = (size.h * z) + 'px'
-      }
-    })
-  }
-
+  // Cargar PDF
   useEffect(() => {
     if (!url) return
     let cancelled = false
     setCargando(true); setError(null)
+    stateRef.current = { zoom: 1, x: 0, y: 0 }
     async function cargar() {
       try {
         const pdfjsLib = await import('pdfjs-dist')
@@ -93,80 +105,64 @@ export default function PdfViewer({ url }) {
     return () => { cancelled = true }
   }, [url, renderizarTodo])
 
-  // ZOOM con rueda — centrado en cursor
+  // ZOOM con rueda — bloquear scroll completamente, solo zoom
   useEffect(() => {
-    const scrollEl = scrollRef.current
-    if (!scrollEl) return
+    const el = containerRef.current
+    if (!el) return
     function onWheel(e) {
       e.preventDefault()
-      const oldZoom = zoomRef.current
-      const factor  = e.deltaY > 0 ? 0.9 : 1.1
-      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldZoom * factor))
-      if (newZoom === oldZoom) return
-
-      const rect       = scrollEl.getBoundingClientRect()
-      const mouseX     = e.clientX - rect.left
-      const mouseY     = e.clientY - rect.top
-      const scrollLeft = scrollEl.scrollLeft
-      const scrollTop  = scrollEl.scrollTop
-      const contentX   = (scrollLeft + mouseX) / oldZoom
-      const contentY   = (scrollTop  + mouseY) / oldZoom
-
-      zoomRef.current = newZoom
-      setZoom(newZoom)
-      aplicarZoom(newZoom)
-
-      requestAnimationFrame(() => {
-        scrollEl.scrollLeft = contentX * newZoom - mouseX
-        scrollEl.scrollTop  = contentY * newZoom - mouseY
-      })
+      e.stopPropagation()
+      const oldZ   = stateRef.current.zoom
+      const factor = e.deltaY < 0 ? 1.1 : 0.9
+      const newZ   = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldZ * factor))
+      if (newZ === oldZ) return
+      const rect   = el.getBoundingClientRect()
+      const pivotX = e.clientX - rect.left
+      const pivotY = e.clientY - rect.top
+      applyZoom(newZ, pivotX, pivotY)
     }
-    scrollEl.addEventListener('wheel', onWheel, { passive: false })
-    return () => scrollEl.removeEventListener('wheel', onWheel)
+    // capture:true para interceptar antes de cualquier scroll
+    el.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    return () => el.removeEventListener('wheel', onWheel, { capture: true })
   }, [])
 
-  // PAN con click + drag (manito)
+  // PAN con drag
   function onMouseDown(e) {
     if (e.button !== 0) return
-    const scrollEl = scrollRef.current
-    if (!scrollEl) return
     draggingRef.current = true
     dragStartRef.current = {
-      x: e.clientX, y: e.clientY,
-      scrollLeft: scrollEl.scrollLeft,
-      scrollTop:  scrollEl.scrollTop,
+      mx: e.clientX, my: e.clientY,
+      ox: stateRef.current.x,
+      oy: stateRef.current.y,
     }
-    scrollEl.style.cursor = 'grabbing'
+    e.currentTarget.style.cursor = 'grabbing'
     e.preventDefault()
   }
-
   function onMouseMove(e) {
     if (!draggingRef.current) return
-    const scrollEl = scrollRef.current
-    if (!scrollEl) return
-    const dx = e.clientX - dragStartRef.current.x
-    const dy = e.clientY - dragStartRef.current.y
-    scrollEl.scrollLeft = dragStartRef.current.scrollLeft - dx
-    scrollEl.scrollTop  = dragStartRef.current.scrollTop  - dy
+    const dx = e.clientX - dragStartRef.current.mx
+    const dy = e.clientY - dragStartRef.current.my
+    stateRef.current.x = dragStartRef.current.ox + dx
+    stateRef.current.y = dragStartRef.current.oy + dy
+    applyTransform()
   }
-
-  function onMouseUp() {
+  function onMouseUp(e) {
     draggingRef.current = false
-    const scrollEl = scrollRef.current
-    if (scrollEl) scrollEl.style.cursor = 'grab'
+    if (e.currentTarget) e.currentTarget.style.cursor = 'grab'
   }
 
-  function zoomIn()  { const n = Math.min(MAX_ZOOM, zoomRef.current * 1.2); zoomRef.current = n; setZoom(n); aplicarZoom(n) }
-  function zoomOut() { const n = Math.max(MIN_ZOOM, zoomRef.current / 1.2); zoomRef.current = n; setZoom(n); aplicarZoom(n) }
+  function zoomIn()  { const n = Math.min(MAX_ZOOM, stateRef.current.zoom * 1.2); applyZoom(n, containerRef.current.clientWidth/2, containerRef.current.clientHeight/2) }
+  function zoomOut() { const n = Math.max(MIN_ZOOM, stateRef.current.zoom / 1.2); applyZoom(n, containerRef.current.clientWidth/2, containerRef.current.clientHeight/2) }
   function zoomReset() {
-    const scrollEl = scrollRef.current
-    if (!scrollEl || !baseSizesRef.current[0]) return
-    const containerW = scrollEl.clientWidth - 32
-    const pageW      = baseSizesRef.current[0].w
-    const fitZoom    = Math.min(1, containerW / pageW)
-    zoomRef.current  = fitZoom
-    setZoom(fitZoom); aplicarZoom(fitZoom)
-    scrollEl.scrollTop = 0; scrollEl.scrollLeft = 0
+    const container = containerRef.current
+    if (!container || !baseSizesRef.current[0]) return
+    const cw = container.clientWidth  - 32
+    const ch = container.clientHeight - 32
+    const { w, h } = baseSizesRef.current[0]
+    const fitZ = Math.min(1, cw / w, ch / h)
+    stateRef.current = { zoom: fitZ, x: 16, y: 16 }
+    setZoom(fitZ)
+    applyTransform()
   }
 
   if (!url) return (
@@ -188,9 +184,10 @@ export default function PdfViewer({ url }) {
         </div>
       </div>
 
+      {/* overflow:hidden — sin scroll, sin escape de eventos */}
       <div
-        ref={scrollRef}
-        style={{ ...s.scrollArea, cursor: 'grab' }}
+        ref={containerRef}
+        style={s.viewport}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
@@ -203,10 +200,13 @@ export default function PdfViewer({ url }) {
           </div>
         )}
         {error && <div style={s.errorBox}>{error}</div>}
-        <div ref={wrapperRef} style={{ padding: '16px', display: cargando ? 'none' : 'block', minWidth: 'min-content' }} />
+        <div
+          ref={wrapperRef}
+          style={{ position: 'absolute', top: 0, left: 0, transformOrigin: '0 0', display: cargando ? 'none' : 'block', padding: '16px' }}
+        />
       </div>
 
-      <div style={s.hint}>🖱 Rueda = zoom · Click + arrastrar = mover</div>
+      <div style={s.hint}>🖱 Rueda = zoom · Arrastrar = mover</div>
     </div>
   )
 }
@@ -217,7 +217,7 @@ const s = {
   headerLabel:{ color: '#ccc', fontSize: '0.75rem', fontWeight: 600 },
   zoomBtn:    { background: 'rgba(255,255,255,0.1)', color: '#fff', border: 'none', borderRadius: '4px', padding: '3px 10px', fontSize: '0.95rem', cursor: 'pointer', lineHeight: 1, minWidth: '26px' },
   zoomLabel:  { color: '#ccc', fontSize: '0.72rem', minWidth: '42px', textAlign: 'center' },
-  scrollArea: { flex: 1, overflow: 'auto', position: 'relative', background: '#2A2A2A', userSelect: 'none' },
+  viewport:   { flex: 1, position: 'relative', overflow: 'hidden', cursor: 'grab', background: '#2A2A2A', userSelect: 'none' },
   loading:    { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' },
   errorBox:   { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#E2401B', fontSize: '0.85rem' },
   empty:      { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#2A2A2A' },
