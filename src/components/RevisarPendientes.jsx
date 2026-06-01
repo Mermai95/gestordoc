@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import PdfViewer from './PdfViewer'
 
 const CODIGOS_IVA = [
   { codigo: '2', pct: '21,0', label: '2 — 21%' },
@@ -211,7 +212,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       </div>
 
       {/* MARGEN BLANCO */}
-      <div style={{ height: '8px', background: '#fff', flexShrink: 0 }} />
+      <div style={{ height: '16px', background: '#F0EEE8', borderBottom: '1px solid #D8D4CB', flexShrink: 0 }} />
 
       {/* CUERPO */}
       <div style={s.body}>
@@ -239,8 +240,9 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                   const total    = (parseFloat(f.base_imponible) || 0) + (parseFloat(f.cuota_iva) || 0)
                   const esAbono  = f.tipo === 'abono' || total < 0
                   const aviso    = detectarEjercicio(f.fecha_expedicion)
-                  const notaIA   = f.ia_raw?.notas || ''
-                  const obs      = [aviso, notaIA].filter(Boolean).join(' · ')
+                  const notaIA   = f.ia_raw?.notas ? '📄 Pág. múltiple' : ''
+                  const avisoCorto = aviso ? 'Ej. anterior ⚠' : ''
+                  const obs      = [avisoCorto, notaIA].filter(Boolean).join(' · ')
                   return (
                     <tr key={f.id} onClick={() => setSeleccionId(f.id)}
                       style={{ ...s.tr, ...(isSel ? s.trSel : {}), ...(aviso ? s.trAviso : {}) }}>
@@ -252,7 +254,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                       <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '0.77rem' }}>{f.num_factura || '—'}</td>
                       <td style={{ ...s.td, textAlign: 'right', color: esAbono ? '#E2401B' : '#1C1C1C', fontWeight: 600 }}>{total.toFixed(2)}</td>
                       <td style={s.td}>{esAbono ? 'Abono' : 'Recibida'}</td>
-                      <td style={{ ...s.td, color: aviso ? '#C05000' : '#6B6B6B', fontSize: '0.75rem', whiteSpace: 'normal', maxWidth: 'none' }}>{obs || ''}</td>
+                      <td style={{ ...s.td, color: avisoCorto ? '#C05000' : '#6B6B6B', fontSize: '0.73rem', whiteSpace: 'nowrap', maxWidth: 'none', overflow: 'hidden', textOverflow: 'ellipsis' }}>{obs || ''}</td>
                     </tr>
                   )
                 })}
@@ -353,17 +355,9 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
 
         </div>
 
-        {/* DERECHA — PDF */}
+        {/* DERECHA — PDF con zoom */}
         <div style={s.rightPane}>
-          <div style={s.pdfHeader}>📄 Documento original</div>
-          {pdfUrl ? (
-            <iframe src={pdfUrl + '#toolbar=0&navpanes=0&view=FitH'} style={s.pdfFrame} title="Documento original" />
-          ) : (
-            <div style={s.pdfEmpty}>
-              <div style={{ fontSize: '2.5rem', opacity: 0.25, marginBottom: '8px' }}>📄</div>
-              <span style={{ fontSize: '0.82rem' }}>Sin documento adjunto</span>
-            </div>
-          )}
+          <PdfViewer url={pdfUrl} />
         </div>
 
       </div>
