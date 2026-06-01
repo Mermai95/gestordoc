@@ -5,14 +5,14 @@ const MIN_ZOOM = 0.25
 const MAX_ZOOM = 5
 
 export default function PdfViewer({ url }) {
-  const containerRef = useRef(null)  // div exterior — overflow:hidden, NO scroll
-  const wrapperRef   = useRef(null)  // div interior — se mueve con transform
-  const pdfRef       = useRef(null)
-  const baseSizesRef = useRef([])
-  const stateRef     = useRef({ zoom: 1, x: 0, y: 0 })  // estado sin re-render
-  const draggingRef  = useRef(false)
-  const dragStartRef = useRef({ mx: 0, my: 0, ox: 0, oy: 0 })
-  const [zoom, setZoom] = useState(1)
+  const containerRef  = useRef(null)
+  const wrapperRef    = useRef(null)
+  const pdfRef        = useRef(null)
+  const baseSizesRef  = useRef([])
+  const stateRef      = useRef({ zoom: 1, x: 0, y: 0 })
+  const draggingRef   = useRef(false)
+  const dragStartRef  = useRef({ mx: 0, my: 0, ox: 0, oy: 0 })
+  const [zoom,     setZoom]     = useState(1)
   const [cargando, setCargando] = useState(true)
   const [error,    setError]    = useState(null)
 
@@ -20,13 +20,12 @@ export default function PdfViewer({ url }) {
     const w = wrapperRef.current
     if (!w) return
     const { zoom: z, x, y } = stateRef.current
-    w.style.transform = `translate(${x}px, ${y}px) scale(${z})`
+    w.style.transform       = `translate(${x}px, ${y}px) scale(${z})`
     w.style.transformOrigin = '0 0'
   }
 
   function applyZoom(newZoom, pivotX, pivotY) {
-    // pivotX/Y en coordenadas del contenedor
-    const old  = stateRef.current
+    const old    = stateRef.current
     const factor = newZoom / old.zoom
     stateRef.current = {
       zoom: newZoom,
@@ -37,6 +36,27 @@ export default function PdfViewer({ url }) {
     applyTransform()
   }
 
+  // Callback ref — registra el wheel exactamente cuando el div entra al DOM
+  const setContainerRef = useCallback((el) => {
+    containerRef.current = el
+    if (!el) return
+
+    function onWheel(e) {
+      e.preventDefault()
+      e.stopPropagation()
+      const oldZ   = stateRef.current.zoom
+      const factor = e.deltaY < 0 ? 1.1 : 0.9
+      const newZ   = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldZ * factor))
+      if (newZ === oldZ) return
+      const rect   = el.getBoundingClientRect()
+      const pivotX = e.clientX - rect.left
+      const pivotY = e.clientY - rect.top
+      applyZoom(newZ, pivotX, pivotY)
+    }
+
+    el.addEventListener('wheel', onWheel, { passive: false, capture: true })
+  }, [])
+
   const renderizarTodo = useCallback(async (pdf) => {
     const wrapper = wrapperRef.current
     if (!wrapper) return
@@ -44,17 +64,17 @@ export default function PdfViewer({ url }) {
     baseSizesRef.current = []
 
     for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i)
-      const vp   = page.getViewport({ scale: RENDER_SCALE })
+      const page  = await pdf.getPage(i)
+      const vp    = page.getViewport({ scale: RENDER_SCALE })
       const baseW = vp.width  / RENDER_SCALE
       const baseH = vp.height / RENDER_SCALE
       baseSizesRef.current.push({ w: baseW, h: baseH })
 
-      const canvas        = document.createElement('canvas')
-      canvas.width        = vp.width
-      canvas.height       = vp.height
-      canvas.style.width  = baseW + 'px'
-      canvas.style.height = baseH + 'px'
+      const canvas               = document.createElement('canvas')
+      canvas.width               = vp.width
+      canvas.height              = vp.height
+      canvas.style.width         = baseW + 'px'
+      canvas.style.height        = baseH + 'px'
       canvas.style.display       = 'block'
       canvas.style.marginBottom  = '16px'
       canvas.style.boxShadow     = '0 4px 16px rgba(0,0,0,0.4)'
@@ -66,13 +86,12 @@ export default function PdfViewer({ url }) {
       await page.render({ canvasContext: ctx, viewport: vp }).promise
     }
 
-    // Zoom inicial para que el PDF entre en el contenedor
     const container = containerRef.current
     if (container && baseSizesRef.current[0]) {
-      const cw     = container.clientWidth  - 32
-      const ch     = container.clientHeight - 32
+      const cw  = container.clientWidth  - 32
+      const ch  = container.clientHeight - 32
       const { w, h } = baseSizesRef.current[0]
-      const fitZ   = Math.min(1, cw / w, ch / h)
+      const fitZ = Math.min(1, cw / w, ch / h)
       stateRef.current = { zoom: fitZ, x: 16, y: 16 }
       setZoom(fitZ)
       applyTransform()
@@ -80,12 +99,13 @@ export default function PdfViewer({ url }) {
     setCargando(false)
   }, [])
 
-  // Cargar PDF
   useEffect(() => {
     if (!url) return
     let cancelled = false
-    setCargando(true); setError(null)
+    setCargando(true)
+    setError(null)
     stateRef.current = { zoom: 1, x: 0, y: 0 }
+
     async function cargar() {
       try {
         const pdfjsLib = await import('pdfjs-dist')
@@ -105,33 +125,10 @@ export default function PdfViewer({ url }) {
     return () => { cancelled = true }
   }, [url, renderizarTodo])
 
-  // ZOOM con rueda — bloquear scroll completamente, solo zoom
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) { console.log('NO HAY EL'); return }
-    console.log('registrando wheel en', el)
-   function onWheel(e) {
-      e.preventDefault()
-      e.stopPropagation()
-      console.log('wheel', e.deltaY)
-      const oldZ   = stateRef.current.zoom
-      const factor = e.deltaY < 0 ? 1.1 : 0.9
-      const newZ   = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldZ * factor))
-      if (newZ === oldZ) return
-      const rect   = el.getBoundingClientRect()
-      const pivotX = e.clientX - rect.left
-      const pivotY = e.clientY - rect.top
-      applyZoom(newZ, pivotX, pivotY)
-    }
-    // capture:true para interceptar antes de cualquier scroll
-    el.addEventListener('wheel', onWheel, { passive: false, capture: true })
-    return () => el.removeEventListener('wheel', onWheel, { capture: true })
-  }, [])
-
   // PAN con drag
   function onMouseDown(e) {
     if (e.button !== 0) return
-    draggingRef.current = true
+    draggingRef.current  = true
     dragStartRef.current = {
       mx: e.clientX, my: e.clientY,
       ox: stateRef.current.x,
@@ -153,13 +150,21 @@ export default function PdfViewer({ url }) {
     if (e.currentTarget) e.currentTarget.style.cursor = 'grab'
   }
 
-  function zoomIn()  { const n = Math.min(MAX_ZOOM, stateRef.current.zoom * 1.2); applyZoom(n, containerRef.current.clientWidth/2, containerRef.current.clientHeight/2) }
-  function zoomOut() { const n = Math.max(MIN_ZOOM, stateRef.current.zoom / 1.2); applyZoom(n, containerRef.current.clientWidth/2, containerRef.current.clientHeight/2) }
+  function zoomIn() {
+    const c = containerRef.current
+    if (!c) return
+    applyZoom(Math.min(MAX_ZOOM, stateRef.current.zoom * 1.2), c.clientWidth / 2, c.clientHeight / 2)
+  }
+  function zoomOut() {
+    const c = containerRef.current
+    if (!c) return
+    applyZoom(Math.max(MIN_ZOOM, stateRef.current.zoom / 1.2), c.clientWidth / 2, c.clientHeight / 2)
+  }
   function zoomReset() {
     const container = containerRef.current
     if (!container || !baseSizesRef.current[0]) return
-    const cw = container.clientWidth  - 32
-    const ch = container.clientHeight - 32
+    const cw  = container.clientWidth  - 32
+    const ch  = container.clientHeight - 32
     const { w, h } = baseSizesRef.current[0]
     const fitZ = Math.min(1, cw / w, ch / h)
     stateRef.current = { zoom: fitZ, x: 16, y: 16 }
@@ -186,9 +191,8 @@ export default function PdfViewer({ url }) {
         </div>
       </div>
 
-      {/* overflow:hidden — sin scroll, sin escape de eventos */}
       <div
-        ref={containerRef}
+        ref={setContainerRef}
         style={s.viewport}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
