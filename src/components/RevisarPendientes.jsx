@@ -1,6 +1,25 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
+const CODIGOS_IVA = [
+  { codigo: '2', pct: '21,0', label: '2 — 21%' },
+  { codigo: '1', pct: '10,0', label: '1 — 10%' },
+  { codigo: '5', pct: '4,0',  label: '5 — 4%'  },
+  { codigo: '3', pct: '21,0', label: '3 — 21% (RE)' },
+  { codigo: '0', pct: '0,0',  label: '0 — Exento' },
+]
+
+const ANIO_ACTUAL = new Date().getFullYear()
+
+function detectarEjercicio(fecha) {
+  if (!fecha) return null
+  const anio = new Date(fecha).getFullYear()
+  if (isNaN(anio)) return null
+  if (anio < ANIO_ACTUAL) return `Ejercicio ${anio} — año anterior`
+  if (anio > ANIO_ACTUAL) return `Ejercicio ${anio} — año futuro`
+  return null
+}
+
 export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   const [facturas,     setFacturas]     = useState([])
   const [seleccionId,  setSeleccionId]  = useState(null)
@@ -12,14 +31,13 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   const [flash,        setFlash]        = useState(false)
 
   const seleccionada = facturas.find(f => f.id === seleccionId) || null
+  const avisoEjercicio = seleccionada ? detectarEjercicio(seleccionada.fecha_expedicion) : null
 
   useEffect(() => { fetchPendientes() }, [clienteId])
-
   useEffect(() => {
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = '' }
   }, [])
-
   useEffect(() => {
     if (seleccionada?.archivo_url) cargarPdf(seleccionada.archivo_url)
     else setPdfUrl(null)
@@ -77,6 +95,22 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
     }))
   }
 
+  function agregarLineaIva(codigoObj) {
+    setFacturas(fs => fs.map(f => {
+      if (f.id !== seleccionId) return f
+      const nuevaLinea = { codigo: codigoObj.codigo, base_imponible: '0.00', pct_iva: codigoObj.pct, cuota_iva: '0.00', deducible: '0.00' }
+      return { ...f, lineas_extra: [...(f.lineas_extra || []), nuevaLinea] }
+    }))
+  }
+
+  function eliminarLineaExtra(idx) {
+    setFacturas(fs => fs.map(f => {
+      if (f.id !== seleccionId) return f
+      const lineas = (f.lineas_extra || []).filter((_, i) => i !== idx)
+      return { ...f, lineas_extra: lineas }
+    }))
+  }
+
   const parseDate = str => {
     if (!str) return null
     if (str.toString().includes('/')) {
@@ -91,7 +125,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
     setGuardando(true)
     const f = seleccionada
     const { error } = await supabase.from('facturas').update({
-      estado: 'validada',
+      estado:           'validada',
       num_factura:      f.num_factura || null,
       fecha_expedicion: parseDate(f.fecha_expedicion),
       fecha_operacion:  parseDate(f.fecha_operacion),
@@ -113,7 +147,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       setFacturas(restantes)
       onValidada?.()
       if (restantes.length > 0) setSeleccionId(restantes[0].id)
-      else { onCerrar?.() }
+      else onCerrar?.()
     }
     setGuardando(false)
   }
@@ -132,7 +166,8 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   const totalFactura = seleccionada
     ? (parseFloat(seleccionada.base_imponible) || 0)
     + (parseFloat(seleccionada.cuota_iva) || 0)
-    + (seleccionada.lineas_extra || []).reduce((s, l) => s + (parseFloat(l.base_imponible) || 0) + (parseFloat(l.cuota_iva) || 0), 0)
+    + (seleccionada.lineas_extra || []).reduce((s, l) =>
+        s + (parseFloat(l.base_imponible) || 0) + (parseFloat(l.cuota_iva) || 0), 0)
     : 0
 
   const bolitaColor = conf => ({ alta: '#22A722', media: '#F5A623', baja: '#E2401B' }[conf] || '#9B9B9B')
@@ -156,11 +191,14 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   return (
     <div style={s.shell}>
 
-      {/* ── BARRA SUPERIOR ── */}
+      {/* BARRA SUPERIOR */}
       <div style={s.topBar}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <span style={s.topTitle}>Identificación de facturas</span>
-          <span style={s.topMeta}>{facturas.length} pendiente{facturas.length !== 1 ? 's' : ''}{revisadas > 0 ? ' · ' + revisadas + ' revisada' + (revisadas !== 1 ? 's' : '') : ''}</span>
+          <span style={s.topMeta}>
+            {facturas.length} pendiente{facturas.length !== 1 ? 's' : ''}
+            {revisadas > 0 ? ' · ' + revisadas + ' revisada' + (revisadas !== 1 ? 's' : '') : ''}
+          </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {totalInicial > 1 && (
@@ -172,44 +210,49 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
         </div>
       </div>
 
-      {/* ── CUERPO PRINCIPAL: izquierda (lista + detalle) | derecha (PDF) ── */}
+      {/* MARGEN BLANCO */}
+      <div style={{ height: '8px', background: '#fff', flexShrink: 0 }} />
+
+      {/* CUERPO */}
       <div style={s.body}>
 
         {/* IZQUIERDA */}
         <div style={s.leftPane}>
 
-          {/* Lista de facturas — tabla A3 */}
+          {/* Tabla */}
           <div style={s.listaBox}>
             <table style={s.tabla}>
               <thead>
                 <tr>
                   <th style={{ ...s.th, width: '36px', textAlign: 'center' }}>Estado</th>
-                  <th style={s.th}>Empresa / Expedidor</th>
-                  <th style={{ ...s.th, width: '88px' }}>Fecha</th>
-                  <th style={{ ...s.th, width: '120px' }}>Nº Factura</th>
-                  <th style={{ ...s.th, width: '95px', textAlign: 'right' }}>Total</th>
-                  <th style={{ ...s.th, width: '80px' }}>Tipo</th>
-                  <th style={{ ...s.th, width: '80px' }}>Observaciones</th>
+                  <th style={{ ...s.th, width: '160px' }}>Empresa</th>
+                  <th style={{ ...s.th, width: '82px' }}>Fecha</th>
+                  <th style={{ ...s.th, width: '110px' }}>Nº Factura</th>
+                  <th style={{ ...s.th, width: '85px', textAlign: 'right' }}>Total</th>
+                  <th style={{ ...s.th, width: '72px' }}>Tipo</th>
+                  <th style={s.th}>Observaciones / Incidencias</th>
                 </tr>
               </thead>
               <tbody>
                 {facturas.map(f => {
-                  const isSel   = f.id === seleccionId
-                  const total   = (parseFloat(f.base_imponible) || 0) + (parseFloat(f.cuota_iva) || 0)
-                  const esAbono = f.tipo === 'abono' || total < 0
-                  const tieneNota = f.ia_raw?.notas || ''
+                  const isSel    = f.id === seleccionId
+                  const total    = (parseFloat(f.base_imponible) || 0) + (parseFloat(f.cuota_iva) || 0)
+                  const esAbono  = f.tipo === 'abono' || total < 0
+                  const aviso    = detectarEjercicio(f.fecha_expedicion)
+                  const notaIA   = f.ia_raw?.notas || ''
+                  const obs      = [aviso, notaIA].filter(Boolean).join(' · ')
                   return (
                     <tr key={f.id} onClick={() => setSeleccionId(f.id)}
-                      style={{ ...s.tr, ...(isSel ? s.trSel : {}) }}>
+                      style={{ ...s.tr, ...(isSel ? s.trSel : {}), ...(aviso ? s.trAviso : {}) }}>
                       <td style={{ ...s.td, textAlign: 'center' }}>
                         <span style={{ ...s.bolita, background: bolitaColor(f.ia_confianza) }} />
                       </td>
-                      <td style={{ ...s.td, fontWeight: isSel ? 700 : 400 }}>{f.expedidor || '—'}</td>
+                      <td style={{ ...s.td, fontWeight: isSel ? 700 : 400, maxWidth: '160px' }}>{f.expedidor || '—'}</td>
                       <td style={s.td}>{f.fecha_expedicion ? new Date(f.fecha_expedicion).toLocaleDateString('es-ES') : '—'}</td>
                       <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '0.77rem' }}>{f.num_factura || '—'}</td>
                       <td style={{ ...s.td, textAlign: 'right', color: esAbono ? '#E2401B' : '#1C1C1C', fontWeight: 600 }}>{total.toFixed(2)}</td>
                       <td style={s.td}>{esAbono ? 'Abono' : 'Recibida'}</td>
-                      <td style={{ ...s.td, fontSize: '0.72rem', color: '#E2401B' }}>{tieneNota ? '⚠' : ''}</td>
+                      <td style={{ ...s.td, color: aviso ? '#C05000' : '#6B6B6B', fontSize: '0.75rem', whiteSpace: 'normal', maxWidth: 'none' }}>{obs || ''}</td>
                     </tr>
                   )
                 })}
@@ -217,21 +260,20 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
             </table>
           </div>
 
-          {/* Detalle editable */}
-          <div style={{ ...s.detalle, ...(flash ? s.detalleFlash : {}) }}>
+          {/* Detalle */}
+          <div style={{ ...s.detalle, ...(flash ? s.detalleFlash : {}), ...(avisoEjercicio ? s.detalleAviso : {}) }}>
             {seleccionada ? (
               <>
                 <div style={s.detalleHeader}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={s.detalleTitle}>Detalle de la factura</span>
                     <span style={{ ...s.bolita, background: bolitaColor(seleccionada.ia_confianza) }} />
-                    <span style={{ fontSize: '0.72rem', color: bolitaColor(seleccionada.ia_confianza), fontWeight: 600 }}>IA {seleccionada.ia_confianza}</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={descartarFactura} disabled={guardando} style={s.btnDesc}>🗑 Descartar</button>
-                    <button onClick={validarFactura}   disabled={guardando} style={s.btnVal}>
-                      {guardando ? '…' : '✓ Revisada · Interpretar'}
-                    </button>
+                    <span style={{ fontSize: '0.72rem', color: bolitaColor(seleccionada.ia_confianza), fontWeight: 600 }}>
+                      IA {seleccionada.ia_confianza}
+                    </span>
+                    {avisoEjercicio && (
+                      <span style={s.avisoEjChip}>⚠ {avisoEjercicio}</span>
+                    )}
                   </div>
                 </div>
 
@@ -249,6 +291,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
 
                   <div style={s.divider} />
 
+                  {/* Línea principal IVA */}
                   <div style={s.grid4}>
                     <F label="Base Imp." value={seleccionada.base_imponible} onChange={v => editarCampo('base_imponible', v)} right />
                     <F label="% IVA"     value={seleccionada.pct_iva}        onChange={v => editarCampo('pct_iva', v)} right />
@@ -256,9 +299,13 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                     <F label="Deducible" value={seleccionada.deducible}      onChange={v => editarCampo('deducible', v)} right />
                   </div>
 
+                  {/* Líneas extra */}
                   {(seleccionada.lineas_extra || []).map((linea, idx) => (
                     <div key={idx} style={s.lineaBox}>
-                      <span style={s.lineaTag}>IVA {linea.pct_iva}%</span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '7px' }}>
+                        <span style={s.lineaTag}>Código {linea.codigo || '—'} · IVA {linea.pct_iva}%</span>
+                        <button onClick={() => eliminarLineaExtra(idx)} style={s.btnElimLinea} title="Eliminar línea">✕</button>
+                      </div>
                       <div style={s.grid4}>
                         <F label="Base"      value={linea.base_imponible} onChange={v => editarLineaExtra(idx, 'base_imponible', v)} right />
                         <F label="% IVA"     value={linea.pct_iva}        onChange={v => editarLineaExtra(idx, 'pct_iva', v)} right />
@@ -268,14 +315,33 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                     </div>
                   ))}
 
+                  {/* Botón agregar línea IVA */}
+                  <AgregarIva onAgregar={agregarLineaIva} />
+
+                  {/* Total */}
                   <div style={s.totalBox}>
                     <span style={s.totalLabel}>Total factura</span>
                     <span style={s.totalValor}>{totalFactura.toFixed(2)} €</span>
                   </div>
 
+                  {/* Notas IA */}
                   {seleccionada.ia_raw?.notas && (
                     <div style={s.notasBox}>⚠ {seleccionada.ia_raw.notas}</div>
                   )}
+
+                  {/* Aviso ejercicio */}
+                  {avisoEjercicio && (
+                    <div style={s.avisoEjBox}>📅 {avisoEjercicio} — verificar si corresponde cargar en este periodo</div>
+                  )}
+
+                  {/* Botones acción */}
+                  <div style={s.botonesBox}>
+                    <button onClick={descartarFactura} disabled={guardando} style={s.btnDesc}>🗑 Descartar</button>
+                    <button onClick={validarFactura}   disabled={guardando} style={s.btnVal}>
+                      {guardando ? '…' : '✓ Revisada · Interpretar'}
+                    </button>
+                  </div>
+
                 </div>
               </>
             ) : (
@@ -287,7 +353,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
 
         </div>
 
-        {/* DERECHA — PDF full height */}
+        {/* DERECHA — PDF */}
         <div style={s.rightPane}>
           <div style={s.pdfHeader}>📄 Documento original</div>
           {pdfUrl ? (
@@ -301,6 +367,30 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
         </div>
 
       </div>
+    </div>
+  )
+}
+
+// ── Selector de código IVA ────────────────────────────────────────────────────
+function AgregarIva({ onAgregar }) {
+  const [abierto, setAbierto] = useState(false)
+  return (
+    <div style={{ position: 'relative', marginBottom: '4px' }}>
+      <button onClick={() => setAbierto(v => !v)} style={s.btnAgregarIva}>
+        + Agregar línea de IVA
+      </button>
+      {abierto && (
+        <div style={s.ivaDropdown}>
+          {CODIGOS_IVA.map(c => (
+            <div key={c.codigo}
+              onClick={() => { onAgregar(c); setAbierto(false) }}
+              style={s.ivaOpcion}>
+              <span style={s.ivaCodigo}>{c.codigo}</span>
+              <span style={s.ivaLabel}>{c.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -330,31 +420,42 @@ const s = {
 
   body:       { flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', minHeight: 0 },
 
-  // IZQUIERDA
   leftPane:   { display: 'flex', flexDirection: 'column', borderRight: '3px solid #C8C4BC', minHeight: 0 },
 
-  listaBox:   { flex: '0 0 42%', overflowY: 'auto', background: '#fff', borderBottom: '2px solid #C8C4BC' },
-  tabla:      { width: '100%', borderCollapse: 'collapse', fontSize: '0.83rem' },
-  th:         { position: 'sticky', top: 0, padding: '7px 10px', textAlign: 'left', fontSize: '0.67rem', fontWeight: 700, color: '#5A5A5A', textTransform: 'uppercase', letterSpacing: '0.4px', background: '#DEDAD3', borderBottom: '1px solid #C8C4BC', zIndex: 1 },
+  listaBox:   { flex: '0 0 40%', overflowY: 'auto', background: '#fff', borderBottom: '2px solid #C8C4BC' },
+  tabla:      { width: '100%', borderCollapse: 'collapse', fontSize: '0.83rem', tableLayout: 'fixed' },
+  th:         { position: 'sticky', top: 0, padding: '7px 10px', textAlign: 'left', fontSize: '0.67rem', fontWeight: 700, color: '#5A5A5A', textTransform: 'uppercase', letterSpacing: '0.4px', background: '#DEDAD3', borderBottom: '1px solid #C8C4BC', zIndex: 1, overflow: 'hidden' },
   tr:         { cursor: 'pointer', borderBottom: '1px solid #EDEAE3' },
   trSel:      { background: '#C9E8F5' },
-  td:         { padding: '7px 10px', color: '#1C1C1C', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '200px' },
+  trAviso:    { background: '#FFF3E0' },
+  td:         { padding: '7px 10px', color: '#1C1C1C', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   bolita:     { display: 'inline-block', width: '12px', height: '12px', borderRadius: '50%', verticalAlign: 'middle' },
 
   detalle:        { flex: 1, display: 'flex', flexDirection: 'column', background: '#F5F3EE', minHeight: 0, transition: 'box-shadow 0.3s' },
   detalleFlash:   { boxShadow: 'inset 0 0 0 3px #7ED957' },
-  detalleHeader:  { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', background: '#DEDAD3', borderBottom: '1px solid #C8C4BC', flexShrink: 0 },
-  detalleTitle:   { fontSize: '0.8rem', fontWeight: 700 },
+  detalleAviso:   { borderTop: '3px solid #F5A623' },
+  detalleHeader:  { display: 'flex', alignItems: 'center', padding: '8px 14px', background: '#DEDAD3', borderBottom: '1px solid #C8C4BC', flexShrink: 0 },
+  detalleTitle:   { fontSize: '0.8rem', fontWeight: 700, marginRight: '4px' },
   detalleScroll:  { flex: 1, overflowY: 'auto', padding: '12px 14px' },
 
-  btnVal:     { background: '#1A472A', color: '#fff', border: 'none', borderRadius: '5px', padding: '7px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer' },
-  btnDesc:    { background: '#fff', color: '#E2401B', border: '1px solid #FFCC80', borderRadius: '5px', padding: '7px 12px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' },
+  avisoEjChip:{ background: '#FFF3E0', color: '#C05000', border: '1px solid #FFB74D', borderRadius: '10px', padding: '2px 8px', fontSize: '0.7rem', fontWeight: 600 },
+  avisoEjBox: { background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: '5px', padding: '7px 10px', fontSize: '0.75rem', color: '#C05000', marginTop: '10px' },
 
-  // DERECHA
+  botonesBox: { display: 'flex', gap: '8px', marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #D8D4CB' },
+  btnVal:     { flex: 2, background: '#1A472A', color: '#fff', border: 'none', borderRadius: '5px', padding: '10px 14px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer' },
+  btnDesc:    { flex: 1, background: '#fff', color: '#E2401B', border: '1px solid #FFCC80', borderRadius: '5px', padding: '10px 12px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' },
+
   rightPane:  { display: 'flex', flexDirection: 'column', background: '#2A2A2A', minHeight: 0 },
   pdfHeader:  { padding: '7px 14px', background: '#3A3A3A', color: '#ccc', fontSize: '0.75rem', fontWeight: 600, flexShrink: 0, borderBottom: '1px solid #555' },
   pdfFrame:   { flex: 1, width: '100%', border: 'none', display: 'block' },
   pdfEmpty:   { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#666' },
+
+  btnAgregarIva:{ background: '#E8F0FE', color: '#1565C0', border: '1px dashed #90CAF9', borderRadius: '5px', padding: '6px 12px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', width: '100%', marginBottom: '10px' },
+  ivaDropdown:  { position: 'absolute', top: '100%', left: 0, background: '#fff', border: '1px solid #D8D4CB', borderRadius: '6px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', zIndex: 20, minWidth: '200px' },
+  ivaOpcion:    { display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #EDEAE3' },
+  ivaCodigo:    { background: '#1A472A', color: '#fff', borderRadius: '4px', padding: '2px 8px', fontSize: '0.8rem', fontWeight: 700, minWidth: '22px', textAlign: 'center' },
+  ivaLabel:     { fontSize: '0.82rem', color: '#1C1C1C' },
+  btnElimLinea: { background: 'transparent', border: 'none', color: '#E2401B', cursor: 'pointer', fontSize: '0.8rem', padding: '0 4px', fontWeight: 700 },
 
   fg:     { marginBottom: '8px' },
   lbl:    { display: 'block', fontSize: '0.65rem', fontWeight: 600, color: '#6B6B6B', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '3px' },
@@ -366,6 +467,6 @@ const s = {
   totalLabel: { fontSize: '0.76rem', fontWeight: 600, color: '#1A472A' },
   totalValor: { fontSize: '1.1rem', fontWeight: 700, color: '#1A472A' },
   lineaBox:   { background: '#EDEAE3', borderRadius: '5px', padding: '9px', marginBottom: '8px' },
-  lineaTag:   { display: 'inline-block', background: '#1A472A', color: '#fff', borderRadius: '3px', padding: '1px 7px', fontSize: '0.65rem', fontWeight: 700, marginBottom: '7px' },
+  lineaTag:   { display: 'inline-block', background: '#1A472A', color: '#fff', borderRadius: '3px', padding: '1px 7px', fontSize: '0.65rem', fontWeight: 700 },
   notasBox:   { background: '#FFF8E1', border: '1px solid #FFE082', borderRadius: '5px', padding: '7px 10px', fontSize: '0.75rem', color: '#B8860B', marginTop: '10px' },
 }
