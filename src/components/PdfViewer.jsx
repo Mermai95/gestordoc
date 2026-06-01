@@ -108,7 +108,8 @@ export default function PdfViewer({ url }) {
   // ZOOM con rueda — bloquear scroll completamente, solo zoom
   useEffect(() => {
     const el = containerRef.current
-    if (!el) return
+    if (!el) { console.log('NO HAY EL'); return }
+    console.log('registrando wheel en', el)
    function onWheel(e) {
       e.preventDefault()
       e.stopPropagation()
