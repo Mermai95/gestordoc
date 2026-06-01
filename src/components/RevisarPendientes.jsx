@@ -10,19 +10,36 @@ const CODIGOS_IVA = [
   { codigo: '0', pct: '0,0',  label: '0 — Exento' },
 ]
 
-const ANIO_ACTUAL  = new Date().getFullYear()
-const COL_DEFAULTS = [36, 160, 82, 110, 85, 72, 180]
-const COL_STORAGE  = 'gestordoc_col_widths'
+const ANIO_ACTUAL = new Date().getFullYear()
 
-function loadColWidths() {
+// Definición de columnas (key estable para identificarlas)
+const COLS_DEFAULT = [
+  { key: 'estado',  label: 'Estado',                       w: 50 },
+  { key: 'empresa', label: 'Empresa',                      w: 180 },
+  { key: 'fecha',   label: 'Fecha',                        w: 90 },
+  { key: 'num',     label: 'Nº Factura',                   w: 120 },
+  { key: 'total',   label: 'Total',                        w: 90, align: 'right' },
+  { key: 'tipo',    label: 'Tipo',                         w: 80 },
+  { key: 'obs',     label: 'Observaciones / Incidencias',  w: 200 },
+]
+const COL_STORAGE = 'gestordoc_cols_v2'
+
+function loadCols() {
   try {
     const saved = localStorage.getItem(COL_STORAGE)
     if (saved) {
       const parsed = JSON.parse(saved)
-      if (Array.isArray(parsed) && parsed.length === COL_DEFAULTS.length) return parsed
+      if (Array.isArray(parsed) && parsed.length === COLS_DEFAULT.length) {
+        // Validar que tenga todas las keys conocidas
+        const keysOk = parsed.every(c => COLS_DEFAULT.find(d => d.key === c.key))
+        if (keysOk) {
+          // Mergear con defaults para recuperar label/align si cambia algo
+          return parsed.map(c => ({ ...COLS_DEFAULT.find(d => d.key === c.key), ...c }))
+        }
+      }
     }
   } catch(e) {}
-  return [...COL_DEFAULTS]
+  return COLS_DEFAULT.map(c => ({ ...c }))
 }
 
 function detectarEjercicio(fecha) {
@@ -43,8 +60,10 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   const [revisadas,    setRevisadas]    = useState(0)
   const [totalInicial, setTotalInicial] = useState(0)
   const [flash,        setFlash]        = useState(false)
-  const [colWidths,    setColWidths]    = useState(loadColWidths)
-  const resizingRef = useRef(null)
+  const [cols, setCols] = useState(loadCols)
+  const resizingRef     = useRef(null)
+  const draggedColRef   = useRef(null)
+  const [dragOverIdx, setDragOverIdx] = useState(null)
 
   const seleccionada   = facturas.find(f => f.id === seleccionId) || null
   const avisoEjercicio = seleccionada ? detectarEjercicio(seleccionada.fecha_expedicion) : null
@@ -59,21 +78,22 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
     else setPdfUrl(null)
   }, [seleccionId])
 
-  // Guardar anchos en localStorage cuando cambian
+  // Guardar cols (orden + anchos) en localStorage
   useEffect(() => {
-    try { localStorage.setItem(COL_STORAGE, JSON.stringify(colWidths)) } catch(e) {}
-  }, [colWidths])
+    try { localStorage.setItem(COL_STORAGE, JSON.stringify(cols)) } catch(e) {}
+  }, [cols])
 
-  // Resize handlers
+  // Resize de columna por índice
   const onResizeStart = useCallback((e, idx) => {
     e.preventDefault()
-    resizingRef.current = { idx, startX: e.clientX, startW: colWidths[idx] }
+    e.stopPropagation()
+    resizingRef.current = { idx, startX: e.clientX, startW: cols[idx].w }
 
     function onMove(ev) {
       if (!resizingRef.current) return
       const { idx: i, startX, startW } = resizingRef.current
-      const newW = Math.max(30, startW + (ev.clientX - startX))
-      setColWidths(ws => { const n = [...ws]; n[i] = newW; return n })
+      const newW = Math.max(40, startW + (ev.clientX - startX))
+      setCols(cs => { const n = [...cs]; n[i] = { ...n[i], w: newW }; return n })
     }
     function onUp() {
       resizingRef.current = null
@@ -82,11 +102,41 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
-    document.body.style.cursor     = 'col-resize'
+    document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
-  }, [colWidths])
+  }, [cols])
+
+  // Drag para reordenar columnas
+  function onDragStart(e, idx) {
+    draggedColRef.current = idx
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(idx))  // requerido en Firefox
+  }
+  function onDragOver(e, idx) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOverIdx !== idx) setDragOverIdx(idx)
+  }
+  function onDragLeave() { setDragOverIdx(null) }
+  function onDrop(e, idx) {
+    e.preventDefault()
+    const fromIdx = draggedColRef.current
+    setDragOverIdx(null)
+    if (fromIdx == null || fromIdx === idx) return
+    setCols(cs => {
+      const nuevas = [...cs]
+      const [moved] = nuevas.splice(fromIdx, 1)
+      nuevas.splice(idx, 0, moved)
+      return nuevas
+    })
+    draggedColRef.current = null
+  }
+  function onDragEnd() {
+    draggedColRef.current = null
+    setDragOverIdx(null)
+  }
 
   async function fetchPendientes() {
     setLoading(true)
@@ -216,8 +266,6 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   const bolitaColor = conf => ({ alta: '#22A722', media: '#F5A623', baja: '#E2401B' }[conf] || '#9B9B9B')
   const progreso    = totalInicial > 0 ? Math.round((revisadas / totalInicial) * 100) : 0
 
-  const COL_LABELS = ['Estado', 'Empresa', 'Fecha', 'Nº Factura', 'Total', 'Tipo', 'Observaciones / Incidencias']
-
   if (loading) return (
     <div style={{ ...s.shell, alignItems: 'center', justifyContent: 'center' }}>
       <p style={{ color: '#9B9B9B' }}>Cargando pendientes…</p>
@@ -264,19 +312,38 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
         {/* IZQUIERDA */}
         <div style={s.leftPane}>
 
-          {/* Tabla con columnas redimensionables */}
+          {/* Tabla con columnas redimensionables y reordenables */}
           <div style={s.listaBox}>
-            <table style={{ ...s.tabla, width: colWidths.reduce((a, b) => a + b, 0) + 'px' }}>
+            <table style={{ ...s.tabla, width: cols.reduce((a, c) => a + c.w, 0) + 'px' }}>
               <thead>
                 <tr>
-                  {COL_LABELS.map((label, idx) => (
-                    <th key={idx} style={{ ...s.th, width: colWidths[idx] + 'px', position: 'relative' }}>
-                      <span style={{ textAlign: idx === 4 ? 'right' : 'left', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {label}
+                  {cols.map((col, idx) => (
+                    <th
+                      key={col.key}
+                      draggable
+                      onDragStart={e => onDragStart(e, idx)}
+                      onDragOver={e => onDragOver(e, idx)}
+                      onDragLeave={onDragLeave}
+                      onDrop={e => onDrop(e, idx)}
+                      onDragEnd={onDragEnd}
+                      style={{
+                        ...s.th,
+                        width: col.w + 'px',
+                        position: 'relative',
+                        textAlign: col.align || 'left',
+                        cursor: 'move',
+                        ...(dragOverIdx === idx ? { background: '#B5D6C0' } : {}),
+                      }}
+                      title="Arrastrar para reordenar · Borde derecho para redimensionar"
+                    >
+                      <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                        ⋮⋮ {col.label}
                       </span>
-                      {idx < COL_LABELS.length - 1 && (
+                      {idx < cols.length - 1 && (
                         <div
                           onMouseDown={e => onResizeStart(e, idx)}
+                          onClick={e => e.stopPropagation()}
+                          draggable={false}
                           style={s.resizer}
                           title="Arrastrar para redimensionar"
                         />
@@ -294,18 +361,40 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                   const avisoCorto = aviso ? 'Ej. anterior ⚠' : ''
                   const notaIA     = f.ia_raw?.notas ? '📄 Pág. múltiple' : ''
                   const obs        = [avisoCorto, notaIA].filter(Boolean).join(' · ')
+
+                  // Función para devolver el contenido de cada celda según la key
+                  function celda(key) {
+                    switch (key) {
+                      case 'estado':  return <span style={{ ...s.bolita, background: bolitaColor(f.ia_confianza) }} />
+                      case 'empresa': return f.expedidor || '—'
+                      case 'fecha':   return f.fecha_expedicion ? new Date(f.fecha_expedicion).toLocaleDateString('es-ES') : '—'
+                      case 'num':     return f.num_factura || '—'
+                      case 'total':   return total.toFixed(2)
+                      case 'tipo':    return esAbono ? 'Abono' : 'Recibida'
+                      case 'obs':     return obs || ''
+                      default:        return ''
+                    }
+                  }
+                  function styleCelda(col) {
+                    const base = { ...s.td, width: col.w + 'px', textAlign: col.align || 'left' }
+                    switch (col.key) {
+                      case 'estado':  return { ...base, textAlign: 'center' }
+                      case 'empresa': return { ...base, fontWeight: isSel ? 700 : 400 }
+                      case 'num':     return { ...base, fontFamily: 'monospace', fontSize: '0.77rem' }
+                      case 'total':   return { ...base, textAlign: 'right', color: esAbono ? '#E2401B' : '#1C1C1C', fontWeight: 600 }
+                      case 'obs':     return { ...base, color: avisoCorto ? '#C05000' : '#6B6B6B', fontSize: '0.73rem' }
+                      default:        return base
+                    }
+                  }
+
                   return (
                     <tr key={f.id} onClick={() => setSeleccionId(f.id)}
                       style={{ ...s.tr, ...(isSel ? s.trSel : {}), ...(aviso ? s.trAviso : {}) }}>
-                      <td style={{ ...s.td, width: colWidths[0] + 'px', textAlign: 'center' }}>
-                        <span style={{ ...s.bolita, background: bolitaColor(f.ia_confianza) }} />
-                      </td>
-                      <td style={{ ...s.td, width: colWidths[1] + 'px', fontWeight: isSel ? 700 : 400 }}>{f.expedidor || '—'}</td>
-                      <td style={{ ...s.td, width: colWidths[2] + 'px' }}>{f.fecha_expedicion ? new Date(f.fecha_expedicion).toLocaleDateString('es-ES') : '—'}</td>
-                      <td style={{ ...s.td, width: colWidths[3] + 'px', fontFamily: 'monospace', fontSize: '0.77rem' }}>{f.num_factura || '—'}</td>
-                      <td style={{ ...s.td, width: colWidths[4] + 'px', textAlign: 'right', color: esAbono ? '#E2401B' : '#1C1C1C', fontWeight: 600 }}>{total.toFixed(2)}</td>
-                      <td style={{ ...s.td, width: colWidths[5] + 'px' }}>{esAbono ? 'Abono' : 'Recibida'}</td>
-                      <td style={{ ...s.td, width: colWidths[6] + 'px', color: avisoCorto ? '#C05000' : '#6B6B6B', fontSize: '0.73rem' }}>{obs || ''}</td>
+                      {cols.map(col => (
+                        <td key={col.key} style={styleCelda(col)}>
+                          {celda(col.key)}
+                        </td>
+                      ))}
                     </tr>
                   )
                 })}
@@ -460,7 +549,7 @@ const s = {
   listaBox:   { flex: '0 0 40%', overflowX: 'auto', overflowY: 'auto', background: '#fff', borderBottom: '2px solid #C8C4BC' },
   tabla:      { borderCollapse: 'collapse', fontSize: '0.83rem', tableLayout: 'fixed' },
   th:         { position: 'sticky', top: 0, padding: '7px 10px', textAlign: 'left', fontSize: '0.67rem', fontWeight: 700, color: '#5A5A5A', textTransform: 'uppercase', letterSpacing: '0.4px', background: '#DEDAD3', borderBottom: '1px solid #C8C4BC', zIndex: 1, userSelect: 'none' },
-  resizer:    { position: 'absolute', top: 0, right: 0, width: '5px', height: '100%', cursor: 'col-resize', background: 'transparent', zIndex: 2 },
+  resizer:    { position: 'absolute', top: 0, right: 0, width: '8px', height: '100%', cursor: 'col-resize', background: 'transparent', zIndex: 2, borderRight: '2px solid transparent' },
   tr:         { cursor: 'pointer', borderBottom: '1px solid #EDEAE3' },
   trSel:      { background: '#C9E8F5' },
   trAviso:    { background: '#FFF3E0' },
