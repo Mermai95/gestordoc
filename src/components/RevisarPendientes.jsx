@@ -416,7 +416,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                     <span style={s.detalleTitle}>Detalle de la factura</span>
                     <span style={{ ...s.bolita, background: bolitaColor(seleccionada.ia_confianza) }} />
                     <span style={{ fontSize: '0.72rem', color: bolitaColor(seleccionada.ia_confianza), fontWeight: 600 }}>
-                      IA {seleccionada.ia_confianza}
+                      Confianza {seleccionada.ia_confianza}
                     </span>
                     {avisoEjercicio && (
                       <span style={s.avisoEjChip}>⚠ {avisoEjercicio}</span>
@@ -478,7 +478,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                   <div style={s.botonesBox}>
                     <button onClick={descartarFactura} disabled={guardando} style={s.btnDesc}>🗑 Descartar</button>
                     <button onClick={validarFactura}   disabled={guardando} style={s.btnVal}>
-                      {guardando ? '…' : '✓ Revisada · Interpretar'}
+                      {guardando ? '…' : '✓ Revisada'}
                     </button>
                   </div>
 
@@ -553,12 +553,12 @@ const s = {
 
   listaBox:   { flex: '0 0 40%', overflowX: 'auto', overflowY: 'auto', background: '#fff', borderBottom: '2px solid #C8C4BC' },
   tabla:      { borderCollapse: 'collapse', fontSize: '0.83rem', tableLayout: 'fixed' },
-  th:         { position: 'sticky', top: 0, padding: '7px 10px', textAlign: 'left', fontSize: '0.67rem', fontWeight: 700, color: '#5A5A5A', textTransform: 'uppercase', letterSpacing: '0.4px', background: '#DEDAD3', borderBottom: '1px solid #C8C4BC', zIndex: 1, userSelect: 'none' },
+  th:         { position: 'sticky', top: 0, padding: '7px 10px', textAlign: 'left', fontSize: '0.67rem', fontWeight: 700, color: '#5A5A5A', textTransform: 'uppercase', letterSpacing: '0.4px', background: '#DEDAD3', borderBottom: '1px solid #C8C4BC', borderRight: '1px solid #C8C4BC', zIndex: 1, userSelect: 'none' },
   resizer:    { position: 'absolute', top: 0, right: 0, width: '6px', height: '100%', cursor: 'col-resize', zIndex: 10, background: 'transparent' },
   tr:         { cursor: 'pointer', borderBottom: '1px solid #EDEAE3' },
   trSel:      { background: '#C9E8F5' },
   trAviso:    { background: '#FFF3E0' },
-  td:         { padding: '7px 10px', color: '#1C1C1C', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  td:         { padding: '7px 10px', color: '#1C1C1C', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', borderRight: '1px solid #EDEAE3' },
   bolita:     { display: 'inline-block', width: '12px', height: '12px', borderRadius: '50%', verticalAlign: 'middle' },
 
   detalle:        { flex: 1, display: 'flex', flexDirection: 'column', background: '#F5F3EE', minHeight: 0, transition: 'box-shadow 0.3s' },
