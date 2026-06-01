@@ -339,7 +339,7 @@ const onResizeStart = useCallback((e, idx) => {
                       </span>
                       {idx < cols.length - 1 && (
                         <div
-                          onMouseDown={e => onResizeStart(e, idx)}
+                          onMouseDown={e => { e.stopPropagation(); onResizeStart(e, idx) }}
                           onClick={e => e.stopPropagation()}
                           draggable={false}
                           style={s.resizer}
