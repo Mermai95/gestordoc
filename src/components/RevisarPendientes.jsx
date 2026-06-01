@@ -26,34 +26,33 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
     }
   }, [seleccionId])
 
-  async function fetchPendientes() {
-    setLoading(true)
-    const { data } = await supabase
+ async function fetchPendientes() {
+  setLoading(true)
+  const { data } = await supabase
+    .from('facturas')
+    .select('*')
+    .eq('cliente_id', clienteId)
+    .eq('estado', 'pendiente')
+    .order('created_at', { ascending: false })
+  const list = data ?? []
+  setFacturas(list)
+  if (list.length > 0) setSeleccionId(list[0].id)
+  setLoading(false)
+}
+
+async function cargarPdf(archivo_url) {
+  setLoadingPdf(true)
+  setPdfUrl(null)
+  try {
+    const { data } = supabase.storage
       .from('facturas')
-      .select('*')
-      .eq('cliente_id', clienteId)
-      .eq('estado', 'pendiente')
-      .order('created_at', { ascending: false })
-    const list = data ?? []
-    setFacturas(list)
-    if (list.length > 0) setSeleccionId(list[0].id)
-    setLoading(false)
+      .getPublicUrl(archivo_url)
+    if (data?.publicUrl) setPdfUrl(data.publicUrl)
+  } catch (err) {
+    console.error('Error cargando PDF:', err)
   }
-
-  async function cargarPdf(archivo_url) {
-    setLoadingPdf(true)
-    setPdfUrl(null)
-    try {
-      const { data } = await supabase.storage
-        .from('facturas')
-        .createSignedUrl(archivo_url, 3600)
-      if (data?.signedUrl) setPdfUrl(data.signedUrl)
-    } catch (err) {
-      console.error('Error cargando PDF:', err)
-    }
-    setLoadingPdf(false)
-  }
-
+  setLoadingPdf(false)
+}
   function editarCampo(campo, valor) {
     setFacturas(fs => fs.map(f => {
       if (f.id !== seleccionId) return f
