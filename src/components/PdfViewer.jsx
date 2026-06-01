@@ -109,10 +109,7 @@ export default function PdfViewer({ url }) {
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    function onWheel(e) {
-      e.preventDefault()
-      e.stopPropagation()
-      function onWheel(e) {
+   function onWheel(e) {
       e.preventDefault()
       e.stopPropagation()
       console.log('wheel', e.deltaY)
