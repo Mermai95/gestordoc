@@ -112,6 +112,10 @@ export default function PdfViewer({ url }) {
     function onWheel(e) {
       e.preventDefault()
       e.stopPropagation()
+      function onWheel(e) {
+      e.preventDefault()
+      e.stopPropagation()
+      console.log('wheel', e.deltaY)
       const oldZ   = stateRef.current.zoom
       const factor = e.deltaY < 0 ? 1.1 : 0.9
       const newZ   = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldZ * factor))
