@@ -431,8 +431,8 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                     <F label="NIF / CIF"   value={seleccionada.nif_expedidor} onChange={v => editarCampo('nif_expedidor', v)} mono />
                   </div>
                   <div style={s.grid3}>
-                    <F label="Fecha expedicion" value={seleccionada.fecha_expedicion} onChange={v => editarCampo('fecha_expedicion', v)} />
-                    <F label="Fecha operacion"  value={seleccionada.fecha_operacion}  onChange={v => editarCampo('fecha_operacion', v)} />
+                    <FFecha label="Fecha expedicion" value={seleccionada.fecha_expedicion} onChange={v => editarCampo('fecha_expedicion', v)} />
+                    <FFecha label="Fecha operacion"  value={seleccionada.fecha_operacion}  onChange={v => editarCampo('fecha_operacion', v)} />
                     <F label="Concepto"         value={seleccionada.concepto}         onChange={v => editarCampo('concepto', v)} />
                   </div>
 
@@ -440,7 +440,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
 
                   <div style={s.grid4}>
                     <F label="Base Imp." value={seleccionada.base_imponible} onChange={v => editarCampo('base_imponible', v)} right />
-                    <F label="% IVA"     value={seleccionada.pct_iva}        onChange={v => editarCampo('pct_iva', v)} right />
+                    <SelectorIva label="% IVA" value={seleccionada.pct_iva} onChange={v => editarCampo('pct_iva', v)} />
                     <F label="Cuota IVA" value={seleccionada.cuota_iva}      onChange={v => editarCampo('cuota_iva', v)} right />
                     <F label="Deducible" value={seleccionada.deducible}      onChange={v => editarCampo('deducible', v)} right />
                   </div>
@@ -532,6 +532,65 @@ function F({ label, value, onChange, mono, right }) {
       <label style={s.lbl}>{label}</label>
       <input type="text" value={value ?? ''} onChange={e => onChange(e.target.value)}
         style={{ ...s.inp, ...(mono ? { fontFamily: 'monospace' } : {}), ...(right ? { textAlign: 'right' } : {}) }} />
+    </div>
+  )
+}
+
+// Selector de % IVA por click — mismos valores que CODIGOS_IVA, sin tener que tipear
+function SelectorIva({ label, value, onChange }) {
+  const [abierto, setAbierto] = useState(false)
+  const actual = CODIGOS_IVA.find(c => c.pct === value?.toString()) || null
+  return (
+    <div style={{ ...s.fg, position: 'relative' }}>
+      <label style={s.lbl}>{label}</label>
+      <button type="button" onClick={() => setAbierto(v => !v)}
+        style={{ ...s.inp, textAlign: 'right', cursor: 'pointer', background: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>{actual ? actual.label : (value || '—')}</span>
+        <span style={{ fontSize: '0.65rem', color: '#9B9B9B' }}>▾</span>
+      </button>
+      {abierto && (
+        <div style={{ ...s.ivaDropdown, right: 0, left: 'auto', width: '100%', minWidth: '160px' }}>
+          {CODIGOS_IVA.map(c => (
+            <div key={c.codigo + c.pct}
+              onClick={() => { onChange(c.pct); setAbierto(false) }}
+              style={s.ivaOpcion}>
+              <span style={s.ivaCodigo}>{c.codigo}</span>
+              <span style={s.ivaLabel}>{c.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Muestra la fecha como DD/MM/AAAA. Guarda el valor exactamente igual que el campo F original
+// (mismo formato interno, mismo onChange) — solo cambia cómo se ve en pantalla.
+function FFecha({ label, value, onChange }) {
+  // value llega en formato ISO (AAAA-MM-DD) desde la base de datos
+  const aDisplay = (iso) => {
+    if (!iso) return ''
+    const partes = iso.toString().split('-')
+    if (partes.length !== 3) return iso // ya viene en otro formato, lo mostramos tal cual
+    const [y, m, d] = partes
+    return `${d}/${m}/${y}`
+  }
+  const aISO = (display) => {
+    if (!display) return ''
+    const partes = display.split('/')
+    if (partes.length !== 3) return display // el usuario puede estar escribiendo, no forzamos formato a mitad de tipeo
+    const [d, m, y] = partes
+    if (d.length === 2 && m.length === 2 && y.length === 4) {
+      return `${y}-${m}-${d}`
+    }
+    return display
+  }
+  return (
+    <div style={s.fg}>
+      <label style={s.lbl}>{label}</label>
+      <input type="text" value={aDisplay(value)} placeholder="DD/MM/AAAA"
+        onChange={e => onChange(aISO(e.target.value))}
+        style={s.inp} />
     </div>
   )
 }

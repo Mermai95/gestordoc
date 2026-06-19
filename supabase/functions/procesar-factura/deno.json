@@ -1,5 +1,6 @@
 {
   "imports": {
-    "@supabase/functions-js": "jsr:@supabase/functions-js@^2"
+    "@supabase/functions-js": "jsr:@supabase/functions-js@^2",
+    "pdf-lib": "https://esm.sh/pdf-lib@1.17.1"
   }
 }
