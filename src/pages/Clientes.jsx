@@ -30,11 +30,12 @@ export default function Clientes() {
   }
 
   async function fetchPorConfirmar() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('facturas')
-      .select('nif_cliente_asunto, expedidor')
+      .select('nif_cliente_asunto')
       .is('cliente_id', null)
-      .in('estado', ['pendiente', 'procesada', 'revisar'])
+      .not('nif_cliente_asunto', 'is', null)
+    console.log('clientes por confirmar:', data, error)
     if (!data) { setPorConfirmar([]); return }
     const agrupado = {}
     data.forEach(f => {
