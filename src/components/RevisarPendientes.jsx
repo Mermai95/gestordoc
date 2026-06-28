@@ -15,15 +15,16 @@ const ANIO_ACTUAL = new Date().getFullYear()
 
 // Definición de columnas (key estable para identificarlas)
 const COLS_DEFAULT = [
-  { key: 'estado',  label: 'Estado',                       w: 110 },
-  { key: 'empresa', label: 'Empresa',                      w: 180 },
+  { key: 'estado',     label: 'Estado',                      w: 50 },
+  { key: 'situacion', label: 'Situación',                   w: 110 },
+  { key: 'empresa',   label: 'Empresa',                     w: 180 },
   { key: 'fecha',   label: 'Fecha',                        w: 90 },
   { key: 'num',     label: 'Nº Factura',                   w: 120 },
   { key: 'total',   label: 'Total',                        w: 90, align: 'right' },
   { key: 'tipo',    label: 'Tipo',                         w: 80 },
   { key: 'obs',     label: 'Observaciones / Incidencias',  w: 200 },
 ]
-const COL_STORAGE = 'gestordoc_cols_v2'
+const COL_STORAGE = 'gestordoc_cols_v3'
 
 function loadCols() {
   try {
@@ -167,7 +168,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
 
   async function fetchClientes() {
     const { data } = await supabase
-      .from('clientes').select('id, nombre, nif')
+      .from('clientes').select('id, nombre, nif_cif')
       .eq('activo', true)
       .order('nombre')
     setClientes(data ?? [])
@@ -250,6 +251,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       })
       setSeleccionId(base.id)
       setSelMultiple([])
+      cargarPdf(rutaUnida)
     } catch (err) {
       console.error('Error uniendo facturas:', err)
     }
@@ -260,7 +262,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
     setPdfUrl(null)
     try {
       const { data } = supabase.storage.from('facturas').getPublicUrl(archivo_url)
-      if (data?.publicUrl) setPdfUrl(data.publicUrl)
+      if (data?.publicUrl) setPdfUrl(data.publicUrl + '?t=' + Date.now())
     } catch (err) { console.error(err) }
   }
 
@@ -435,7 +437,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                   >
                     <option value="">{asignando === f.id ? 'Asignando…' : 'Asignar cliente…'}</option>
                     {clientes.map(c => (
-                      <option key={c.id} value={c.id}>{c.nombre} ({c.nif})</option>
+                      <option key={c.id} value={c.id}>{c.nombre} ({c.nif_cif})</option>
                     ))}
                   </select>
                 </div>
@@ -501,7 +503,8 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                   const estadoBadge = { procesada: s.badgeProcesada, revisar: s.badgeRevisar, pendiente: s.badgePendiente }
                   function celda(key) {
                     switch (key) {
-                      case 'estado':  return (
+                      case 'estado':  return <span style={{ ...s.bolita, background: bolitaColor(f.ia_confianza) }} />
+                      case 'situacion': return (
                         <div>
                           <span style={estadoBadge[f.estado] || s.badgePendiente}>
                             {f.estado || 'pendiente'}
@@ -528,8 +531,12 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                   }
                   function styleCelda(col) {
                     const base = { ...s.td, width: col.w + 'px', textAlign: col.align || 'left' }
+                    if (isMarcada) base.background = '#E3F2FD'
+                    if (aviso && !isSel) base.background = '#FFF3E0'
+                    if (isSel) base.background = '#C9E8F5'
                     switch (col.key) {
-                      case 'estado':  return { ...base, textAlign: 'center', whiteSpace: 'normal', overflow: 'visible' }
+                      case 'estado':    return { ...base, textAlign: 'center' }
+                      case 'situacion': return { ...base, textAlign: 'center', whiteSpace: 'normal', overflow: 'visible' }
                       case 'empresa': return { ...base, fontWeight: isSel ? 700 : 400 }
                       case 'num':     return { ...base, fontFamily: 'monospace', fontSize: '0.77rem' }
                       case 'total':   return { ...base, textAlign: 'right', color: esAbono ? '#E2401B' : '#1C1C1C', fontWeight: 600 }
