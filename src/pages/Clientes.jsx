@@ -32,13 +32,13 @@ export default function Clientes() {
   async function fetchPorConfirmar() {
     const { data } = await supabase
       .from('facturas')
-      .select('nif_expedidor, expedidor')
+      .select('nif_cliente_asunto, expedidor')
       .is('cliente_id', null)
       .in('estado', ['pendiente', 'procesada', 'revisar'])
     if (!data) { setPorConfirmar([]); return }
     const agrupado = {}
     data.forEach(f => {
-      const nif = f.nif_expedidor || 'SIN NIF'
+      const nif = f.nif_cliente_asunto || 'SIN NIF'
       if (!agrupado[nif]) agrupado[nif] = { nif, expedidor: f.expedidor, count: 0 }
       agrupado[nif].count++
     })
@@ -68,7 +68,7 @@ export default function Clientes() {
           .from('facturas')
           .update({ cliente_id: nuevoCliente.id })
           .is('cliente_id', null)
-          .eq('nif_expedidor', nifPendiente)
+          .eq('nif_cliente_asunto', nifPendiente)
       }
       setModal(false)
       setForm({ nombre: '', nif_cif: '', email: '', telefono: '' })
