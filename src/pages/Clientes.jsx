@@ -32,23 +32,26 @@ export default function Clientes() {
   async function fetchPorConfirmar() {
     const { data, error } = await supabase
       .from('facturas')
-      .select('nif_cliente_asunto')
+      .select('nif_cliente_asunto, receptor_nombre, receptor_email, receptor_telefono')
       .is('cliente_id', null)
       .not('nif_cliente_asunto', 'is', null)
     console.log('clientes por confirmar:', data, error)
     if (!data) { setPorConfirmar([]); return }
     const agrupado = {}
     data.forEach(f => {
-      const nif = f.nif_cliente_asunto || 'SIN NIF'
-      if (!agrupado[nif]) agrupado[nif] = { nif, expedidor: f.expedidor, count: 0 }
+      const nif = f.nif_cliente_asunto
+      if (!agrupado[nif]) agrupado[nif] = { nif, nombre: '', email: '', telefono: '', count: 0 }
       agrupado[nif].count++
+      if (!agrupado[nif].nombre && f.receptor_nombre) agrupado[nif].nombre = f.receptor_nombre
+      if (!agrupado[nif].email && f.receptor_email) agrupado[nif].email = f.receptor_email
+      if (!agrupado[nif].telefono && f.receptor_telefono) agrupado[nif].telefono = f.receptor_telefono
     })
     setPorConfirmar(Object.values(agrupado).sort((a, b) => b.count - a.count))
   }
 
-  function abrirCrearDesdeNif(nif, expedidor) {
-    setForm({ nombre: expedidor || '', nif_cif: nif === 'SIN NIF' ? '' : nif, email: '', telefono: '' })
-    setNifPendiente(nif === 'SIN NIF' ? null : nif)
+  function abrirCrearDesdeNif(g) {
+    setForm({ nombre: g.nombre || '', nif_cif: g.nif, email: g.email || '', telefono: g.telefono || '' })
+    setNifPendiente(g.nif)
     setModal(true)
   }
 
@@ -101,9 +104,9 @@ export default function Clientes() {
           {porConfirmar.map(g => (
             <div key={g.nif} style={styles.pcRow}>
               <span style={styles.pcNif}>{g.nif}</span>
-              <span style={styles.pcExp}>{g.expedidor || '—'}</span>
+              <span style={styles.pcExp}>{g.nombre || '—'}</span>
               <span style={styles.pcCount}>{g.count} factura{g.count !== 1 ? 's' : ''}</span>
-              <button onClick={() => abrirCrearDesdeNif(g.nif, g.expedidor)} style={styles.pcBtn}>+ Crear cliente</button>
+              <button onClick={() => abrirCrearDesdeNif(g)} style={styles.pcBtn}>+ Crear cliente</button>
             </div>
           ))}
         </div>
