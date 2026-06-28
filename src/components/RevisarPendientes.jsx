@@ -63,9 +63,6 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   const [totalInicial, setTotalInicial] = useState(0)
   const [flash,        setFlash]        = useState(false)
   const [cols, setCols] = useState(loadCols)
-  const [sinCliente,  setSinCliente]  = useState([])
-  const [clientes,    setClientes]    = useState([])
-  const [asignando,   setAsignando]   = useState(null)
   const [selMultiple,  setSelMultiple]  = useState([])
   const resizingRef     = useRef(null)
   const draggedColRef   = useRef(null)
@@ -74,7 +71,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   const seleccionada   = facturas.find(f => f.id === seleccionId) || null
   const avisoEjercicio = seleccionada ? detectarEjercicio(seleccionada.fecha_expedicion) : null
 
-  useEffect(() => { fetchPendientes(); fetchSinCliente(); fetchClientes() }, [clienteId])
+  useEffect(() => { fetchPendientes() }, [clienteId])
   useEffect(() => {
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = '' }
@@ -155,32 +152,6 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
     setTotalInicial(list.length)
     if (list.length > 0) setSeleccionId(list[0].id)
     setLoading(false)
-  }
-
-  async function fetchSinCliente() {
-    const { data } = await supabase
-      .from('facturas').select('id, nif_expedidor, expedidor, estado, num_factura')
-      .is('cliente_id', null)
-      .in('estado', ['pendiente', 'procesada', 'revisar'])
-      .order('created_at', { ascending: false })
-    setSinCliente(data ?? [])
-  }
-
-  async function fetchClientes() {
-    const { data } = await supabase
-      .from('clientes').select('id, nombre, nif_cif')
-      .eq('activo', true)
-      .order('nombre')
-    setClientes(data ?? [])
-  }
-
-  async function asignarCliente(facturaId, nuevoClienteId) {
-    if (!nuevoClienteId) return
-    setAsignando(facturaId)
-    await supabase.from('facturas').update({ cliente_id: nuevoClienteId }).eq('id', facturaId)
-    setSinCliente(prev => prev.filter(f => f.id !== facturaId))
-    if (nuevoClienteId === clienteId) fetchPendientes()
-    setAsignando(null)
   }
 
   function toggleSelMultiple(id) {
@@ -418,32 +389,6 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
 
         {/* IZQUIERDA */}
         <div style={s.leftPane}>
-
-          {/* Facturas sin cliente asignado */}
-          {sinCliente.length > 0 && (
-            <div style={s.sinClienteBox}>
-              <div style={s.sinClienteHeader}>
-                ⚠ Facturas sin cliente asignado ({sinCliente.length})
-              </div>
-              {sinCliente.map(f => (
-                <div key={f.id} style={s.sinClienteRow}>
-                  <span style={s.sinClienteNif}>NIF: {f.nif_expedidor || '—'}</span>
-                  <span style={s.sinClienteExp}>{f.expedidor || '—'}</span>
-                  <select
-                    style={s.sinClienteSelect}
-                    value=""
-                    disabled={asignando === f.id}
-                    onChange={e => asignarCliente(f.id, e.target.value)}
-                  >
-                    <option value="">{asignando === f.id ? 'Asignando…' : 'Asignar cliente…'}</option>
-                    {clientes.map(c => (
-                      <option key={c.id} value={c.id}>{c.nombre} ({c.nif_cif})</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-          )}
 
           {/* Tabla con columnas redimensionables y reordenables */}
           <div style={s.listaBox}>
@@ -837,10 +782,4 @@ const s = {
   btnUnir:      { background: '#1565C0', color: '#fff', border: 'none', borderRadius: '5px', padding: '6px 14px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', width: '100%' },
   unirHint:     { fontSize: '0.7rem', color: '#6B6B6B' },
 
-  sinClienteBox:    { flexShrink: 0, background: '#FFF8E1', borderBottom: '2px solid #FFE082', maxHeight: '160px', overflowY: 'auto' },
-  sinClienteHeader: { padding: '6px 12px', fontSize: '0.75rem', fontWeight: 700, color: '#B8860B', background: '#FFF3E0', borderBottom: '1px solid #FFE082' },
-  sinClienteRow:    { display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 12px', borderBottom: '1px solid #FFEECB', fontSize: '0.8rem' },
-  sinClienteNif:    { fontFamily: 'monospace', fontSize: '0.78rem', fontWeight: 600, color: '#1C1C1C', minWidth: '100px' },
-  sinClienteExp:    { flex: 1, color: '#4A4A4A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  sinClienteSelect: { padding: '4px 8px', border: '1px solid #D8D4CB', borderRadius: '4px', fontSize: '0.78rem', background: '#fff', cursor: 'pointer', minWidth: '180px' },
 }
