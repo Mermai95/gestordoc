@@ -13,8 +13,10 @@ export default function Clientes() {
   const [form,     setForm]     = useState({ nombre: '', nif_cif: '', email: '', telefono: '' })
   const [saving,   setSaving]   = useState(false)
   const [error,    setError]    = useState(null)
+  const [porConfirmar, setPorConfirmar] = useState([])
+  const [nifPendiente, setNifPendiente] = useState(null)
 
-  useEffect(() => { fetchClientes() }, [])
+  useEffect(() => { fetchClientes(); fetchPorConfirmar() }, [])
 
   async function fetchClientes() {
     setLoading(true)
@@ -27,19 +29,52 @@ export default function Clientes() {
     setLoading(false)
   }
 
+  async function fetchPorConfirmar() {
+    const { data } = await supabase
+      .from('facturas')
+      .select('nif_expedidor, expedidor')
+      .is('cliente_id', null)
+      .in('estado', ['pendiente', 'procesada', 'revisar'])
+    if (!data) { setPorConfirmar([]); return }
+    const agrupado = {}
+    data.forEach(f => {
+      const nif = f.nif_expedidor || 'SIN NIF'
+      if (!agrupado[nif]) agrupado[nif] = { nif, expedidor: f.expedidor, count: 0 }
+      agrupado[nif].count++
+    })
+    setPorConfirmar(Object.values(agrupado).sort((a, b) => b.count - a.count))
+  }
+
+  function abrirCrearDesdeNif(nif, expedidor) {
+    setForm({ nombre: expedidor || '', nif_cif: nif === 'SIN NIF' ? '' : nif, email: '', telefono: '' })
+    setNifPendiente(nif === 'SIN NIF' ? null : nif)
+    setModal(true)
+  }
+
   async function handleCrear(e) {
     e.preventDefault()
     setSaving(true)
     setError(null)
-    const { error } = await supabase
+    const { data: nuevoCliente, error: insertErr } = await supabase
       .from('clientes')
       .insert({ ...form, gestor_id: user.id })
-    if (error) {
+      .select('id')
+      .single()
+    if (insertErr) {
       setError('Error al crear el cliente')
     } else {
+      if (nifPendiente && nuevoCliente) {
+        await supabase
+          .from('facturas')
+          .update({ cliente_id: nuevoCliente.id })
+          .is('cliente_id', null)
+          .eq('nif_expedidor', nifPendiente)
+      }
       setModal(false)
       setForm({ nombre: '', nif_cif: '', email: '', telefono: '' })
+      setNifPendiente(null)
       fetchClientes()
+      fetchPorConfirmar()
     }
     setSaving(false)
   }
@@ -53,8 +88,25 @@ export default function Clientes() {
           <h1 style={styles.title}>Clientes</h1>
           <p style={styles.sub}>{clientes.length} empresa{clientes.length !== 1 ? 's' : ''}</p>
         </div>
-        <button onClick={() => setModal(true)} style={styles.btnPrimary}>+ Nuevo cliente</button>
+        <button onClick={() => { setForm({ nombre: '', nif_cif: '', email: '', telefono: '' }); setNifPendiente(null); setModal(true) }} style={styles.btnPrimary}>+ Nuevo cliente</button>
       </div>
+
+      {porConfirmar.length > 0 && (
+        <div style={styles.pcBox}>
+          <div style={styles.pcHeader}>
+            <span style={styles.pcTitle}>⚠️ Clientes por confirmar</span>
+            <span style={styles.pcSub}>{porConfirmar.length} NIF{porConfirmar.length !== 1 ? 's' : ''} sin cliente asignado</span>
+          </div>
+          {porConfirmar.map(g => (
+            <div key={g.nif} style={styles.pcRow}>
+              <span style={styles.pcNif}>{g.nif}</span>
+              <span style={styles.pcExp}>{g.expedidor || '—'}</span>
+              <span style={styles.pcCount}>{g.count} factura{g.count !== 1 ? 's' : ''}</span>
+              <button onClick={() => abrirCrearDesdeNif(g.nif, g.expedidor)} style={styles.pcBtn}>+ Crear cliente</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {clientes.length === 0 ? (
         <div style={styles.empty}>
@@ -85,7 +137,10 @@ export default function Clientes() {
       {modal && (
         <div style={styles.overlay} onClick={() => setModal(false)}>
           <div style={styles.modalCard} onClick={e => e.stopPropagation()}>
-            <h2 style={styles.modalTitle}>Nuevo cliente</h2>
+            <h2 style={styles.modalTitle}>{nifPendiente ? 'Confirmar cliente' : 'Nuevo cliente'}</h2>
+            {nifPendiente && (
+              <p style={styles.nifHint}>Al confirmar se asignarán automáticamente las facturas pendientes de este NIF</p>
+            )}
             <form onSubmit={handleCrear} style={styles.form}>
               <Field label="Nombre / Razón social *" value={form.nombre}    onChange={v => setForm(f => ({...f, nombre: v}))}   required />
               <Field label="NIF / CIF *"              value={form.nif_cif}  onChange={v => setForm(f => ({...f, nif_cif: v}))}  required />
@@ -144,4 +199,14 @@ const styles = {
   form:        { display: 'flex', flexDirection: 'column', gap: '14px' },
   modalActions:{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '8px' },
   error:       { fontSize: '0.82rem', color: '#E65100', background: '#FFF3E0', padding: '8px 12px', borderRadius: '6px' },
+  nifHint:     { fontSize: '0.82rem', color: '#6B6B6B', margin: '0 0 12px', lineHeight: 1.4 },
+  pcBox:       { background: '#FFF8E1', border: '1px solid #FFE082', borderRadius: '10px', marginBottom: '24px', overflow: 'hidden' },
+  pcHeader:    { display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', background: '#FFF3E0', borderBottom: '1px solid #FFE082' },
+  pcTitle:     { fontSize: '0.92rem', fontWeight: 700, color: '#B8860B' },
+  pcSub:       { fontSize: '0.78rem', color: '#B8860B' },
+  pcRow:       { display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 16px', borderBottom: '1px solid #FFEECB' },
+  pcNif:       { fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 600, color: '#1C1C1C', minWidth: '110px' },
+  pcExp:       { flex: 1, fontSize: '0.85rem', color: '#4A4A4A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  pcCount:     { fontSize: '0.78rem', color: '#B8860B', fontWeight: 600, whiteSpace: 'nowrap' },
+  pcBtn:       { background: '#1A472A', color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 14px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' },
 }
