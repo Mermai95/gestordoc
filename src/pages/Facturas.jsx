@@ -56,7 +56,7 @@ export default function Facturas() {
   if (!cliente) return <p style={{ color: '#6B6B6B' }}>Cargando…</p>
 
   const validadas  = facturas.filter(f => f.estado === 'validada')
-  const pendientes = facturas.filter(f => f.estado === 'pendiente')
+  const pendientes = facturas.filter(f => f.estado === 'pendiente' || f.estado === 'revisar')
   const errores    = facturas.filter(f => f.estado === 'error')
 
   return (
@@ -159,6 +159,8 @@ function EstadoBadge({ estado }) {
   const map = {
     validada:  { bg: '#E8F5E9', color: '#2E7D32', label: '✓ Validada'  },
     pendiente: { bg: '#FFF8E1', color: '#F57F17', label: '· Pendiente' },
+    revisar:   { bg: '#FFF8E1', color: '#F57F17', label: '· Revisar'   },
+    procesada: { bg: '#E3F2FD', color: '#1565C0', label: '· Procesada' },
     error:     { bg: '#FFF3E0', color: '#E65100', label: '✗ Error'     },
   }
   const st = map[estado] || map.pendiente
