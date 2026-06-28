@@ -19,6 +19,7 @@ INSTRUCCIONES CRÍTICAS:
 6. El campo "deducible" = igual que "cuota_iva" salvo que indique explícitamente que no es deducible.
 7. Si la página está en blanco o no es una factura, responde: {"es_factura": false}
 8. Si ves que la factura indica "Página X de Y" o "Pág. X/Y" o similar, incluye en "notas": "Página X de Y — puede necesitar unirse con otras páginas".
+9. Si no ves claramente una fecha, deja el campo como string vacío "", NUNCA escribas texto como "sin fecha visible", "ilegible", "no visible" o similar en campos de fecha.
 
 FORMATOS ESPECIALES DE IVA:
 - Makro usa códigos: 1=10%, 2=21%, 3=21%, 5=4% — tradúcelos al porcentaje real.
@@ -29,6 +30,13 @@ FORMATOS ESPECIALES DE IVA:
 NÚMERO DE FACTURA:
 - Cópialo exactamente como aparece, con guiones, barras y letras.
 - Si no aparece claramente, pon lo más parecido que veas.
+
+NIF DEL EXPEDIDOR — REGLA CRÍTICA:
+- El nif_expedidor es SIEMPRE el NIF/CIF del EMISOR de la factura (el proveedor que cobra).
+- Búscalo en el bloque SUPERIOR de la factura: nombre del proveedor + dirección + razón social.
+- NUNCA uses el NIF que aparezca en campos como "Datos del receptor", "Cliente", "Número NIF de cliente", "Razón social del cliente", o cualquier bloque inferior.
+- Si ves dos NIFs en la factura, el del EMISOR es el que está en la cabecera junto al nombre del proveedor. El otro es del receptor — ignóralo para este campo.
+- Si no podés determinar con certeza cuál es el del emisor, pon confianza "baja" y explícalo en notas.
 
 RESPONDE SOLO CON ESTE JSON (sin texto, sin backticks):
 {
@@ -113,6 +121,35 @@ async function procesarPagina(base64: string, mediaType: string, anthropicKey: s
   return JSON.parse(limpio)
 }
 
+// AGENTE: valida que el NIF leído no sea el del propio cliente receptor
+async function validarNifExpedidor(
+  supabaseAdmin: any,
+  nifLeido: string,
+  clienteId: string | null
+): Promise<{ valido: boolean; motivo: string }> {
+  if (!nifLeido || !clienteId) return { valido: true, motivo: '' }
+
+  const { data: cliente } = await supabaseAdmin
+    .from('clientes')
+    .select('nif_cif, nombre')
+    .eq('id', clienteId)
+    .single()
+
+  if (!cliente) return { valido: true, motivo: '' }
+
+  const nifCliente = cliente.nif_cif?.replace(/\s/g, '').toUpperCase()
+  const nifFactura = nifLeido?.replace(/\s/g, '').toUpperCase()
+
+  if (nifCliente && nifFactura && nifCliente === nifFactura) {
+    return {
+      valido: false,
+      motivo: `NIF leído (${nifLeido}) coincide con el cliente receptor (${cliente.nombre}) — probable error de lectura`
+    }
+  }
+
+  return { valido: true, motivo: '' }
+}
+
 // Sube un PDF a Supabase Storage y devuelve la ruta
 async function subirStorage(supabaseAdmin: any, bytes: Uint8Array, nombre: string): Promise<string | null> {
   try {
@@ -135,7 +172,8 @@ async function procesarUnaPagina(
   numPages: number,
   timestamp: number,
   supabaseAdmin: any,
-  anthropicKey: string
+  anthropicKey: string,
+  clienteId: string | null = null
 ): Promise<any | null> {
   try {
     const paginaDoc = await PDFDocument.create()
@@ -161,6 +199,29 @@ async function procesarUnaPagina(
     }
 
     if (archivoUrl) parsed.archivo_url = archivoUrl
+
+    // AGENTE: validar NIF expedidor vs cliente receptor
+   const validacionNif = await validarNifExpedidor(supabaseAdmin, parsed.nif_expedidor, clienteId)
+
+    if (!validacionNif.valido) {
+      parsed.estado = 'revisar'
+      parsed.motivo_revision = validacionNif.motivo
+      parsed.confianza = 'baja'
+      parsed.nif_expedidor = ''
+      return parsed
+    }
+
+    // AGENTE: decidir estado según confianza
+    if (parsed.confianza === 'alta') {
+      parsed.estado = 'procesada'
+    } else if (parsed.confianza === 'media') {
+      parsed.estado = 'revisar'
+      parsed.motivo_revision = 'Confianza media — revisar datos extraídos'
+    } else {
+      parsed.estado = 'revisar'
+      parsed.motivo_revision = 'Confianza baja — ' + (parsed.notas || 'verificar manualmente')
+    }
+
     return parsed
 
   } catch (err) {
@@ -225,6 +286,7 @@ serve(async (req) => {
     let pdfBytes: Uint8Array
     let mediaType = 'application/pdf'
     let esMultipagina = false
+    let clienteIdGlobal: string | null = null
 
     // ── Path n8n NUEVO: JSON con id_lote + total_partes (PDF ya subido en pedazos a Storage) ──
     if (contentType.includes('application/json')) {
@@ -234,6 +296,7 @@ serve(async (req) => {
         // Flujo de lotes: juntar las partes que n8n subió previamente a Storage
         pdfBytes = await juntarPartes(supabaseAdmin, body.id_lote, body.total_partes)
         esMultipagina = true
+        clienteIdGlobal = body.cliente_id || null
 
       } else if (body.pdf_base64) {
         // Compatibilidad con el flujo viejo (PDF chico, base64 directo en el JSON)
@@ -280,7 +343,7 @@ serve(async (req) => {
         for (let i = inicio; i < fin; i++) indicesLote.push(i)
 
         const promesasLote = indicesLote.map((indice) =>
-          procesarUnaPagina(pdfDoc, indice, numPages, timestamp, supabaseAdmin, anthropicKey)
+          procesarUnaPagina(pdfDoc, indice, numPages, timestamp, supabaseAdmin, anthropicKey, clienteIdGlobal)
         )
         const resultadosLote = await Promise.all(promesasLote)
 

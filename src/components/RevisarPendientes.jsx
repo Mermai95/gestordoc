@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import { PDFDocument } from 'pdf-lib'
 import PdfViewer from './PdfViewer'
 
 const CODIGOS_IVA = [
@@ -14,7 +15,7 @@ const ANIO_ACTUAL = new Date().getFullYear()
 
 // Definición de columnas (key estable para identificarlas)
 const COLS_DEFAULT = [
-  { key: 'estado',  label: 'Estado',                       w: 50 },
+  { key: 'estado',  label: 'Estado',                       w: 110 },
   { key: 'empresa', label: 'Empresa',                      w: 180 },
   { key: 'fecha',   label: 'Fecha',                        w: 90 },
   { key: 'num',     label: 'Nº Factura',                   w: 120 },
@@ -61,6 +62,10 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   const [totalInicial, setTotalInicial] = useState(0)
   const [flash,        setFlash]        = useState(false)
   const [cols, setCols] = useState(loadCols)
+  const [sinCliente,  setSinCliente]  = useState([])
+  const [clientes,    setClientes]    = useState([])
+  const [asignando,   setAsignando]   = useState(null)
+  const [selMultiple,  setSelMultiple]  = useState([])
   const resizingRef     = useRef(null)
   const draggedColRef   = useRef(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
@@ -68,7 +73,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   const seleccionada   = facturas.find(f => f.id === seleccionId) || null
   const avisoEjercicio = seleccionada ? detectarEjercicio(seleccionada.fecha_expedicion) : null
 
-  useEffect(() => { fetchPendientes() }, [clienteId])
+  useEffect(() => { fetchPendientes(); fetchSinCliente(); fetchClientes() }, [clienteId])
   useEffect(() => {
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = '' }
@@ -142,13 +147,113 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
     setLoading(true)
     const { data } = await supabase
       .from('facturas').select('*')
-      .eq('cliente_id', clienteId).eq('estado', 'pendiente')
+      .eq('cliente_id', clienteId).in('estado', ['pendiente', 'procesada', 'revisar'])
       .order('created_at', { ascending: false })
     const list = data ?? []
     setFacturas(list)
     setTotalInicial(list.length)
     if (list.length > 0) setSeleccionId(list[0].id)
     setLoading(false)
+  }
+
+  async function fetchSinCliente() {
+    const { data } = await supabase
+      .from('facturas').select('id, nif_expedidor, expedidor, estado, num_factura')
+      .is('cliente_id', null)
+      .in('estado', ['pendiente', 'procesada', 'revisar'])
+      .order('created_at', { ascending: false })
+    setSinCliente(data ?? [])
+  }
+
+  async function fetchClientes() {
+    const { data } = await supabase
+      .from('clientes').select('id, nombre, nif')
+      .eq('activo', true)
+      .order('nombre')
+    setClientes(data ?? [])
+  }
+
+  async function asignarCliente(facturaId, nuevoClienteId) {
+    if (!nuevoClienteId) return
+    setAsignando(facturaId)
+    await supabase.from('facturas').update({ cliente_id: nuevoClienteId }).eq('id', facturaId)
+    setSinCliente(prev => prev.filter(f => f.id !== facturaId))
+    if (nuevoClienteId === clienteId) fetchPendientes()
+    setAsignando(null)
+  }
+
+  function toggleSelMultiple(id) {
+    setSelMultiple(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
+  }
+
+  async function unirFacturas() {
+    if (selMultiple.length < 2 || guardando) return
+    setGuardando(true)
+    const seleccionadas = facturas.filter(f => selMultiple.includes(f.id))
+    const base = seleccionadas[0]
+
+    function mejorValor(campo) {
+      for (const f of seleccionadas) {
+        const v = f[campo]
+        if (v && v !== '0' && v !== 0 && v !== '' && v !== '0.00') return v
+      }
+      return base[campo]
+    }
+
+    const paginaConTotales = [...seleccionadas].reverse().find(f =>
+      parseFloat(f.base_imponible) > 0
+    ) || base
+
+    try {
+      const pdfUnido = await PDFDocument.create()
+      for (const fila of seleccionadas) {
+        try {
+          const { data } = supabase.storage.from('facturas').getPublicUrl(fila.archivo_url)
+          const response = await fetch(data.publicUrl)
+          const buf = await response.arrayBuffer()
+          const doc = await PDFDocument.load(buf)
+          const pages = await pdfUnido.copyPages(doc, doc.getPageIndices())
+          pages.forEach(p => pdfUnido.addPage(p))
+        } catch (e) { console.warn('No se pudo fusionar página:', e) }
+      }
+      const pdfBytes = await pdfUnido.save()
+      const pdfBlob  = new Blob([pdfBytes], { type: 'application/pdf' })
+      const pdfFile  = new File([pdfBlob], `unido_${base.id}.pdf`, { type: 'application/pdf' })
+
+      const rutaUnida = base.archivo_url.replace(/\.[^.]+$/, '_unido.pdf')
+      await supabase.storage.from('facturas').upload(rutaUnida, pdfFile, { upsert: true })
+
+      const datosUnidos = {
+        num_factura:      mejorValor('num_factura'),
+        fecha_expedicion: mejorValor('fecha_expedicion'),
+        fecha_operacion:  mejorValor('fecha_operacion'),
+        concepto:         mejorValor('concepto'),
+        nif_expedidor:    mejorValor('nif_expedidor'),
+        expedidor:        mejorValor('expedidor'),
+        base_imponible:   parseFloat(paginaConTotales.base_imponible) || 0,
+        pct_iva:          paginaConTotales.pct_iva || mejorValor('pct_iva'),
+        cuota_iva:        parseFloat(paginaConTotales.cuota_iva) || 0,
+        deducible:        parseFloat(paginaConTotales.deducible) || 0,
+        lineas_extra:     paginaConTotales.lineas_extra || base.lineas_extra || [],
+        archivo_url:      rutaUnida,
+      }
+      await supabase.from('facturas').update(datosUnidos).eq('id', base.id)
+
+      const otrosIds = seleccionadas.filter(f => f.id !== base.id).map(f => f.id)
+      if (otrosIds.length > 0) {
+        await supabase.from('facturas').delete().in('id', otrosIds)
+      }
+
+      setFacturas(fs => {
+        const nuevas = fs.filter(f => !otrosIds.includes(f.id))
+        return nuevas.map(f => f.id === base.id ? { ...f, ...datosUnidos } : f)
+      })
+      setSeleccionId(base.id)
+      setSelMultiple([])
+    } catch (err) {
+      console.error('Error uniendo facturas:', err)
+    }
+    setGuardando(false)
   }
 
   function cargarPdf(archivo_url) {
@@ -312,6 +417,32 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
         {/* IZQUIERDA */}
         <div style={s.leftPane}>
 
+          {/* Facturas sin cliente asignado */}
+          {sinCliente.length > 0 && (
+            <div style={s.sinClienteBox}>
+              <div style={s.sinClienteHeader}>
+                ⚠ Facturas sin cliente asignado ({sinCliente.length})
+              </div>
+              {sinCliente.map(f => (
+                <div key={f.id} style={s.sinClienteRow}>
+                  <span style={s.sinClienteNif}>NIF: {f.nif_expedidor || '—'}</span>
+                  <span style={s.sinClienteExp}>{f.expedidor || '—'}</span>
+                  <select
+                    style={s.sinClienteSelect}
+                    value=""
+                    disabled={asignando === f.id}
+                    onChange={e => asignarCliente(f.id, e.target.value)}
+                  >
+                    <option value="">{asignando === f.id ? 'Asignando…' : 'Asignar cliente…'}</option>
+                    {clientes.map(c => (
+                      <option key={c.id} value={c.id}>{c.nombre} ({c.nif})</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Tabla con columnas redimensionables y reordenables */}
           <div style={s.listaBox}>
             <table style={{ ...s.tabla, width: cols.reduce((a, c) => a + c.w, 0) + 'px' }}>
@@ -359,31 +490,46 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
               </thead>
               <tbody>
                 {facturas.map(f => {
-                  const isSel      = f.id === seleccionId
-                  const total      = (parseFloat(f.base_imponible) || 0) + (parseFloat(f.cuota_iva) || 0)
-                  const esAbono    = f.tipo === 'abono' || total < 0
-                  const aviso      = detectarEjercicio(f.fecha_expedicion)
-                  const avisoCorto = aviso ? 'Ej. anterior ⚠' : ''
-                  const notaIA     = f.ia_raw?.notas ? '📄 Pág. múltiple' : ''
-                  const obs        = [avisoCorto, notaIA].filter(Boolean).join(' · ')
+                  const isSel       = f.id === seleccionId
+                  const isMarcada   = selMultiple.includes(f.id)
+                  const total       = (parseFloat(f.base_imponible) || 0) + (parseFloat(f.cuota_iva) || 0)
+                  const esAbono     = f.tipo === 'abono' || total < 0
+                  const aviso       = detectarEjercicio(f.fecha_expedicion)
+                  const avisoCorto  = aviso ? 'Ej. anterior ⚠' : ''
+                  const tienePagina = !!f.ia_raw?.notas
 
-                  // Función para devolver el contenido de cada celda según la key
+                  const estadoBadge = { procesada: s.badgeProcesada, revisar: s.badgeRevisar, pendiente: s.badgePendiente }
                   function celda(key) {
                     switch (key) {
-                      case 'estado':  return <span style={{ ...s.bolita, background: bolitaColor(f.ia_confianza) }} />
+                      case 'estado':  return (
+                        <div>
+                          <span style={estadoBadge[f.estado] || s.badgePendiente}>
+                            {f.estado || 'pendiente'}
+                          </span>
+                          {isMarcada && <span style={s.marcadaBadge}>✓ sel.</span>}
+                          {f.estado === 'revisar' && f.motivo_revision && (
+                            <div style={s.motivoTexto}>{f.motivo_revision}</div>
+                          )}
+                        </div>
+                      )
                       case 'empresa': return f.expedidor || '—'
                       case 'fecha':   return f.fecha_expedicion ? new Date(f.fecha_expedicion).toLocaleDateString('es-ES') : '—'
                       case 'num':     return f.num_factura || '—'
                       case 'total':   return total.toFixed(2)
                       case 'tipo':    return esAbono ? 'Abono' : 'Recibida'
-                      case 'obs':     return obs || ''
+                      case 'obs':     return (
+                        <>
+                          {tienePagina && <span style={s.paginaAviso}>⚠ Pág. múltiple</span>}
+                          {avisoCorto ? ` ${avisoCorto}` : ''}
+                        </>
+                      )
                       default:        return ''
                     }
                   }
                   function styleCelda(col) {
                     const base = { ...s.td, width: col.w + 'px', textAlign: col.align || 'left' }
                     switch (col.key) {
-                      case 'estado':  return { ...base, textAlign: 'center' }
+                      case 'estado':  return { ...base, textAlign: 'center', whiteSpace: 'normal', overflow: 'visible' }
                       case 'empresa': return { ...base, fontWeight: isSel ? 700 : 400 }
                       case 'num':     return { ...base, fontFamily: 'monospace', fontSize: '0.77rem' }
                       case 'total':   return { ...base, textAlign: 'right', color: esAbono ? '#E2401B' : '#1C1C1C', fontWeight: 600 }
@@ -393,8 +539,11 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                   }
 
                   return (
-                    <tr key={f.id} onClick={() => setSeleccionId(f.id)}
-                      style={{ ...s.tr, ...(isSel ? s.trSel : {}), ...(aviso ? s.trAviso : {}) }}>
+                    <tr key={f.id} onClick={e => {
+                      if (e.metaKey || e.ctrlKey) toggleSelMultiple(f.id)
+                      else setSeleccionId(f.id)
+                    }}
+                      style={{ ...s.tr, ...(isSel ? s.trSel : {}), ...(aviso ? s.trAviso : {}), ...(isMarcada ? s.trMarcada : {}) }}>
                       {cols.map(col => (
                         <td key={col.key} style={styleCelda(col)}>
                           {celda(col.key)}
@@ -405,6 +554,19 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* Unir páginas */}
+          <div style={s.unirBar}>
+            {selMultiple.length >= 2 ? (
+              <button onClick={unirFacturas} disabled={guardando} style={s.btnUnir}>
+                🔗 Unir {selMultiple.length} páginas en 1 factura
+              </button>
+            ) : selMultiple.length === 1 ? (
+              <span style={s.unirHint}>Selecciona al menos 2 facturas para unir</span>
+            ) : (
+              <span style={s.unirHint}>Cmd+clic (Mac) o Ctrl+clic (Win) para marcar y unir páginas</span>
+            )}
           </div>
 
           {/* Detalle */}
@@ -655,4 +817,23 @@ const s = {
   lineaBox:    { background: '#EDEAE3', borderRadius: '5px', padding: '9px', marginBottom: '8px' },
   lineaTag:    { display: 'inline-block', background: '#1A472A', color: '#fff', borderRadius: '3px', padding: '1px 7px', fontSize: '0.65rem', fontWeight: 700 },
   notasBox:    { background: '#FFF8E1', border: '1px solid #FFE082', borderRadius: '5px', padding: '7px 10px', fontSize: '0.75rem', color: '#B8860B', marginTop: '10px' },
+
+  badgeProcesada: { display: 'inline-block', padding: '2px 7px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, background: '#E3F0E8', color: '#1A472A', textTransform: 'capitalize' },
+  badgeRevisar:   { display: 'inline-block', padding: '2px 7px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, background: '#FFF3E0', color: '#B8860B', textTransform: 'capitalize' },
+  badgePendiente: { display: 'inline-block', padding: '2px 7px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, background: '#ECECEC', color: '#6B6B6B', textTransform: 'capitalize' },
+  motivoTexto:    { fontSize: '0.6rem', color: '#B8860B', marginTop: '2px', lineHeight: 1.2, whiteSpace: 'normal', maxWidth: '100%' },
+
+  trMarcada:    { background: '#E3F2FD', borderLeft: '3px solid #1565C0' },
+  marcadaBadge: { marginLeft: '4px', fontSize: '0.6rem', background: '#1565C0', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: 700 },
+  paginaAviso:  { fontSize: '0.68rem', color: '#E65100', background: '#FFF3E0', borderRadius: '4px', padding: '2px 6px', display: 'inline-block' },
+  unirBar:      { flexShrink: 0, padding: '5px 12px', background: '#F5F3EE', borderBottom: '1px solid #D8D4CB', textAlign: 'center' },
+  btnUnir:      { background: '#1565C0', color: '#fff', border: 'none', borderRadius: '5px', padding: '6px 14px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', width: '100%' },
+  unirHint:     { fontSize: '0.7rem', color: '#6B6B6B' },
+
+  sinClienteBox:    { flexShrink: 0, background: '#FFF8E1', borderBottom: '2px solid #FFE082', maxHeight: '160px', overflowY: 'auto' },
+  sinClienteHeader: { padding: '6px 12px', fontSize: '0.75rem', fontWeight: 700, color: '#B8860B', background: '#FFF3E0', borderBottom: '1px solid #FFE082' },
+  sinClienteRow:    { display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 12px', borderBottom: '1px solid #FFEECB', fontSize: '0.8rem' },
+  sinClienteNif:    { fontFamily: 'monospace', fontSize: '0.78rem', fontWeight: 600, color: '#1C1C1C', minWidth: '100px' },
+  sinClienteExp:    { flex: 1, color: '#4A4A4A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  sinClienteSelect: { padding: '4px 8px', border: '1px solid #D8D4CB', borderRadius: '4px', fontSize: '0.78rem', background: '#fff', cursor: 'pointer', minWidth: '180px' },
 }
