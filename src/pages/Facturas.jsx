@@ -58,8 +58,14 @@ export default function Facturas() {
       periodoFin: `31 Dic ${new Date().getFullYear()}`,
     })
     const ids = validadas.map(f => f.id)
-    await supabase.from('facturas').update({ estado: 'exportada' }).in('id', ids)
-    fetchFacturas()
+    console.log('[exportar] IDs a marcar como exportada:', ids)
+    const { data: updData, error: updError } = await supabase
+      .from('facturas')
+      .update({ estado: 'exportada' })
+      .in('id', ids)
+      .select()
+    console.log('[exportar] update result:', { data: updData, error: updError })
+    await fetchFacturas()
   }
 
   return (
