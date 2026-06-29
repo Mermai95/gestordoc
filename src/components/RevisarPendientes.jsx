@@ -199,7 +199,8 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       const pdfFile  = new File([pdfBlob], `unido_${base.id}.pdf`, { type: 'application/pdf' })
 
       const rutaUnida = base.archivo_url.replace(/\.[^.]+$/, '_unido.pdf')
-      await supabase.storage.from('facturas').upload(rutaUnida, pdfFile, { upsert: true })
+      const { error: uploadErr } = await supabase.storage.from('facturas').upload(rutaUnida, pdfFile, { upsert: true })
+      if (uploadErr) console.error('[unir] upload error:', uploadErr, 'ruta:', rutaUnida)
 
       const datosUnidos = {
         num_factura:      mejorValor('num_factura'),
