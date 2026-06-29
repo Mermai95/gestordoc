@@ -37,10 +37,16 @@ export default function Facturas() {
     fetchFacturas()
   }
 
+  if (!cliente) return <p style={{ color: '#6B6B6B' }}>Cargando…</p>
+
+  const validadas  = facturas.filter(f => f.estado === 'validada')
+  const pendientes = facturas.filter(f => f.estado === 'pendiente' || f.estado === 'revisar')
+  const errores    = facturas.filter(f => f.estado === 'error')
+
   function handleExportar() {
-    if (!facturas.length) return
+    if (!validadas.length) return
     exportarA3({
-      facturas: facturas.map(f => ({
+      facturas: validadas.map(f => ({
         num_factura: f.num_factura, fecha_expedicion: f.fecha_expedicion,
         fecha_operacion: f.fecha_operacion, concepto: f.concepto,
         nif_expedidor: f.nif_expedidor, expedidor: f.expedidor,
@@ -52,12 +58,6 @@ export default function Facturas() {
       periodoFin: `31 Dic ${new Date().getFullYear()}`,
     })
   }
-
-  if (!cliente) return <p style={{ color: '#6B6B6B' }}>Cargando…</p>
-
-  const validadas  = facturas.filter(f => f.estado === 'validada')
-  const pendientes = facturas.filter(f => f.estado === 'pendiente' || f.estado === 'revisar')
-  const errores    = facturas.filter(f => f.estado === 'error')
 
   return (
     <div>
