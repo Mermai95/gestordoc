@@ -43,7 +43,7 @@ export default function Facturas() {
   const pendientes = facturas.filter(f => f.estado === 'pendiente' || f.estado === 'revisar')
   const errores    = facturas.filter(f => f.estado === 'error')
 
-  function handleExportar() {
+  async function handleExportar() {
     if (!validadas.length) return
     exportarA3({
       facturas: validadas.map(f => ({
@@ -57,6 +57,9 @@ export default function Facturas() {
       periodoInicio: '01 Ene',
       periodoFin: `31 Dic ${new Date().getFullYear()}`,
     })
+    const ids = validadas.map(f => f.id)
+    await supabase.from('facturas').update({ estado: 'exportada' }).in('id', ids)
+    fetchFacturas()
   }
 
   return (
@@ -161,6 +164,7 @@ function EstadoBadge({ estado }) {
     pendiente: { bg: '#FFF8E1', color: '#F57F17', label: '· Pendiente' },
     revisar:   { bg: '#FFF8E1', color: '#F57F17', label: '· Revisar'   },
     procesada: { bg: '#E3F2FD', color: '#1565C0', label: '· Procesada' },
+    exportada: { bg: '#E8F5E9', color: '#1A472A', label: '⬇ Exportada' },
     error:     { bg: '#FFF3E0', color: '#E65100', label: '✗ Error'     },
   }
   const st = map[estado] || map.pendiente
