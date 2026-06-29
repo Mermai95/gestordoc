@@ -228,7 +228,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       })
       setSeleccionId(base.id)
       setSelMultiple([])
-      cargarPdf(rutaUnida)
+      setPdfUrl(URL.createObjectURL(pdfBlob))
     } catch (err) {
       console.error('Error uniendo facturas:', err)
     }
