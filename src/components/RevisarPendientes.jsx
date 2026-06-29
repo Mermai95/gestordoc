@@ -186,9 +186,9 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       const pdfUnido = await PDFDocument.create()
       for (const fila of seleccionadas) {
         try {
-          const { data } = supabase.storage.from('facturas').getPublicUrl(fila.archivo_url)
-          const response = await fetch(data.publicUrl)
-          const buf = await response.arrayBuffer()
+          const { data: dlData, error: dlErr } = await supabase.storage.from('facturas').download(fila.archivo_url)
+          if (dlErr || !dlData) { console.error('[unir] download error:', dlErr, 'ruta:', fila.archivo_url); continue }
+          const buf = await dlData.arrayBuffer()
           const doc = await PDFDocument.load(buf)
           const pages = await pdfUnido.copyPages(doc, doc.getPageIndices())
           pages.forEach(p => pdfUnido.addPage(p))
@@ -236,11 +236,12 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
     setGuardando(false)
   }
 
-  function cargarPdf(archivo_url) {
+  async function cargarPdf(archivo_url) {
     setPdfUrl(null)
     try {
-      const { data } = supabase.storage.from('facturas').getPublicUrl(archivo_url)
-      if (data?.publicUrl) setPdfUrl(data.publicUrl + '?t=' + Date.now())
+      const { data, error } = await supabase.storage.from('facturas').download(archivo_url)
+      if (error || !data) { console.error('[cargarPdf] download error:', error, 'ruta:', archivo_url); return }
+      setPdfUrl(URL.createObjectURL(data))
     } catch (err) { console.error(err) }
   }
 
