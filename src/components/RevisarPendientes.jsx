@@ -65,6 +65,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   const [flash,        setFlash]        = useState(false)
   const [cols, setCols] = useState(loadCols)
   const [selMultiple,  setSelMultiple]  = useState([])
+  const skipPdfLoad     = useRef(false)
   const originalesRef   = useRef({})
   const { registrarCorreccion } = useGuardarCorreccion()
   const resizingRef     = useRef(null)
@@ -80,6 +81,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
     return () => { document.body.style.overflow = '' }
   }, [])
   useEffect(() => {
+    if (skipPdfLoad.current) { skipPdfLoad.current = false; return }
     if (seleccionada?.archivo_url) cargarPdf(seleccionada.archivo_url)
     else setPdfUrl(null)
   }, [seleccionId])
@@ -227,9 +229,12 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
         const nuevas = fs.filter(f => !otrosIds.includes(f.id))
         return nuevas.map(f => f.id === base.id ? { ...f, ...datosUnidos } : f)
       })
+      const blobUrl = URL.createObjectURL(pdfBlob)
+      console.log('[unir] blob size:', pdfBlob.size, 'blobUrl:', blobUrl)
+      skipPdfLoad.current = true
+      setPdfUrl(blobUrl)
       setSeleccionId(base.id)
       setSelMultiple([])
-      setPdfUrl(URL.createObjectURL(pdfBlob))
     } catch (err) {
       console.error('Error uniendo facturas:', err)
     }
