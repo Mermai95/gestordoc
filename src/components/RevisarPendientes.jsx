@@ -385,6 +385,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       {/* BARRA SUPERIOR */}
       <div style={s.topBar}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <button onClick={onCerrar} style={s.btnVolverTop}>← Volver</button>
           <span style={s.topTitle}>Identificación de facturas</span>
           <span style={s.topMeta}>
             {facturas.length} pendiente{facturas.length !== 1 ? 's' : ''}
@@ -737,6 +738,7 @@ const s = {
   topTitle:   { fontSize: '0.88rem', fontWeight: 700 },
   topMeta:    { fontSize: '0.75rem', color: '#B5D6C0' },
   btnCerrar:  { background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: '5px', padding: '5px 12px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' },
+  btnVolverTop: { background: 'none', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', borderRadius: '5px', padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' },
   btnVolver:  { background: '#1A472A', color: '#fff', border: 'none', borderRadius: '7px', padding: '10px 22px', fontSize: '0.88rem', fontWeight: 600, cursor: 'pointer' },
   progWrap:   { width: '110px', height: '5px', background: 'rgba(255,255,255,0.2)', borderRadius: '3px', overflow: 'hidden' },
   progBar:    { height: '100%', background: '#7ED957', borderRadius: '3px', transition: 'width 0.4s ease' },
