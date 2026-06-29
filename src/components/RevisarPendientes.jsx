@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { PDFDocument } from 'pdf-lib'
 import PdfViewer from './PdfViewer'
+import { useGuardarCorreccion } from '../hooks/useGuardarCorreccion'
 
 const CODIGOS_IVA = [
   { codigo: '2', pct: '21,0', label: '2 — 21%' },
@@ -64,6 +65,8 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
   const [flash,        setFlash]        = useState(false)
   const [cols, setCols] = useState(loadCols)
   const [selMultiple,  setSelMultiple]  = useState([])
+  const originalesRef   = useRef({})
+  const { registrarCorreccion } = useGuardarCorreccion()
   const resizingRef     = useRef(null)
   const draggedColRef   = useRef(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
@@ -148,6 +151,9 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       .eq('cliente_id', clienteId).in('estado', ['pendiente', 'procesada', 'revisar'])
       .order('created_at', { ascending: false })
     const list = data ?? []
+    const snap = {}
+    list.forEach(f => { snap[f.id] = { ...f } })
+    originalesRef.current = snap
     setFacturas(list)
     setTotalInicial(list.length)
     if (list.length > 0) setSeleccionId(list[0].id)
@@ -311,6 +317,20 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       lineas_extra:     f.lineas_extra || [],
     }).eq('id', f.id)
     if (!error) {
+      const orig = originalesRef.current[f.id]
+      if (orig) {
+        const campos = ['num_factura','expedidor','nif_expedidor','fecha_expedicion','fecha_operacion','concepto','base_imponible','pct_iva','cuota_iva','deducible']
+        const nif = f.nif_expedidor || orig.nif_expedidor
+        campos.forEach(campo => {
+          registrarCorreccion({
+            facturaId: f.id,
+            nifExpedidor: nif,
+            campo,
+            valorOriginal: orig[campo],
+            valorNuevo: f[campo],
+          })
+        })
+      }
       setRevisadas(r => r + 1)
       setFlash(true)
       setTimeout(() => setFlash(false), 500)
