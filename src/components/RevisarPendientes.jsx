@@ -250,10 +250,11 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
     } catch (err) { console.error(err) }
   }
 
-  function editarCampo(campo, valor) {
+  function editarCampo(campo, valor, codigoIva) {
     setFacturas(fs => fs.map(f => {
       if (f.id !== seleccionId) return f
       const u = { ...f, [campo]: valor }
+      if (codigoIva !== undefined) u.codigo_iva = codigoIva
       if (campo === 'base_imponible' || campo === 'pct_iva') {
         const base  = parseFloat(campo === 'base_imponible' ? valor : f.base_imponible) || 0
         const pct   = parseFloat((campo === 'pct_iva' ? valor : f.pct_iva)?.toString().replace(',', '.')) || 0
@@ -319,6 +320,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       expedidor:        f.expedidor || null,
       base_imponible:   parseFloat(f.base_imponible) || 0,
       pct_iva:          f.pct_iva || '21,0',
+      codigo_iva:       f.codigo_iva ?? null,
       cuota_iva:        parseFloat(f.cuota_iva) || 0,
       deducible:        parseFloat(f.deducible) || 0,
       lineas_extra:     f.lineas_extra || [],
@@ -341,11 +343,26 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
       setRevisadas(r => r + 1)
       setFlash(true)
       setTimeout(() => setFlash(false), 500)
-      const restantes = facturas.filter(x => x.id !== f.id)
-      setFacturas(restantes)
-      onValidada?.()
-      if (restantes.length > 0) setSeleccionId(restantes[0].id)
-      else onCerrar?.()
+
+      const eraProcessada = orig?.estado === 'procesada' || f.estado === 'procesada'
+      if (eraProcessada) {
+        setFacturas(fs => fs.map(x => x.id === f.id ? { ...x, estado: 'validada' } : x))
+        onValidada?.()
+        const idx = facturas.findIndex(x => x.id === f.id)
+        const siguiente = facturas.find((x, i) => i > idx && x.id !== f.id && x.estado !== 'validada')
+        if (siguiente) setSeleccionId(siguiente.id)
+      } else {
+        const idx = facturas.findIndex(x => x.id === f.id)
+        const restantes = facturas.filter(x => x.id !== f.id)
+        setFacturas(restantes)
+        onValidada?.()
+        if (restantes.length > 0) {
+          const nextIdx = Math.min(idx, restantes.length - 1)
+          setSeleccionId(restantes[nextIdx].id)
+        } else {
+          onCerrar?.()
+        }
+      }
     }
     setGuardando(false)
   }
@@ -377,7 +394,8 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
     </div>
   )
 
-  if (facturas.length === 0) return (
+  const sinRevisar = facturas.filter(f => f.estado !== 'validada')
+  if (sinRevisar.length === 0) return (
     <div style={{ ...s.shell, alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
       <div style={{ fontSize: '3rem' }}>✓</div>
       <p style={{ color: '#22A722', fontWeight: 700, fontSize: '1.1rem' }}>Bandeja limpia</p>
@@ -471,9 +489,10 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                   const esAbono     = f.tipo === 'abono' || total < 0
                   const aviso       = detectarEjercicio(f.fecha_expedicion)
                   const avisoCorto  = aviso ? 'Ej. anterior ⚠' : ''
-                  const tienePagina = !!f.ia_raw?.notas
+                  const tienePagina = !!f.ia_raw?.posible_pagina_multiple
 
-                  const estadoBadge = { procesada: s.badgeProcesada, revisar: s.badgeRevisar, pendiente: s.badgePendiente }
+                  const esValidada  = f.estado === 'validada'
+                  const estadoBadge = { procesada: s.badgeProcesada, revisar: s.badgeRevisar, pendiente: s.badgePendiente, validada: s.badgeValidada }
                   function celda(key) {
                     switch (key) {
                       case 'estado':  return <span style={{ ...s.bolita, background: bolitaColor(f.ia_confianza) }} />
@@ -504,8 +523,9 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
                   }
                   function styleCelda(col) {
                     const base = { ...s.td, width: col.w + 'px', textAlign: col.align || 'left' }
+                    if (esValidada && !isSel) base.background = '#E8F5E9'
                     if (isMarcada) base.background = '#E3F2FD'
-                    if (aviso && !isSel) base.background = '#FFF3E0'
+                    if (aviso && !isSel && !esValidada) base.background = '#FFF3E0'
                     if (isSel) base.background = '#C9E8F5'
                     switch (col.key) {
                       case 'estado':    return { ...base, textAlign: 'center' }
@@ -582,7 +602,7 @@ export default function RevisarPendientes({ clienteId, onCerrar, onValidada }) {
 
                   <div style={s.grid4}>
                     <F label="Base Imp." value={seleccionada.base_imponible} onChange={v => editarCampo('base_imponible', v)} right />
-                    <SelectorIva label="% IVA" value={seleccionada.pct_iva} onChange={v => editarCampo('pct_iva', v)} />
+                    <SelectorIva label="% IVA" value={seleccionada.pct_iva} codigoIva={seleccionada.codigo_iva} onChange={(v, cod) => editarCampo('pct_iva', v, cod)} />
                     <F label="Cuota IVA" value={seleccionada.cuota_iva}      onChange={v => editarCampo('cuota_iva', v)} right />
                     <F label="Deducible" value={seleccionada.deducible}      onChange={v => editarCampo('deducible', v)} right />
                   </div>
@@ -679,9 +699,11 @@ function F({ label, value, onChange, mono, right }) {
 }
 
 // Selector de % IVA por click — mismos valores que CODIGOS_IVA, sin tener que tipear
-function SelectorIva({ label, value, onChange }) {
+function SelectorIva({ label, value, codigoIva, onChange }) {
   const [abierto, setAbierto] = useState(false)
-  const actual = CODIGOS_IVA.find(c => c.pct === value?.toString()) || null
+  const actual = (codigoIva != null && CODIGOS_IVA.find(c => c.codigo === String(codigoIva)))
+    || CODIGOS_IVA.find(c => c.pct === value?.toString())
+    || null
   return (
     <div style={{ ...s.fg, position: 'relative' }}>
       <label style={s.lbl}>{label}</label>
@@ -693,8 +715,8 @@ function SelectorIva({ label, value, onChange }) {
       {abierto && (
         <div style={{ ...s.ivaDropdown, right: 0, left: 'auto', width: '100%', minWidth: '160px' }}>
           {CODIGOS_IVA.map(c => (
-            <div key={c.codigo + c.pct}
-              onClick={() => { onChange(c.pct); setAbierto(false) }}
+            <div key={c.codigo}
+              onClick={() => { onChange(c.pct, parseInt(c.codigo)); setAbierto(false) }}
               style={s.ivaOpcion}>
               <span style={s.ivaCodigo}>{c.codigo}</span>
               <span style={s.ivaLabel}>{c.label}</span>
@@ -802,6 +824,7 @@ const s = {
   badgeProcesada: { display: 'inline-block', padding: '2px 7px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, background: '#E3F0E8', color: '#1A472A', textTransform: 'capitalize' },
   badgeRevisar:   { display: 'inline-block', padding: '2px 7px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, background: '#FFF3E0', color: '#B8860B', textTransform: 'capitalize' },
   badgePendiente: { display: 'inline-block', padding: '2px 7px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, background: '#ECECEC', color: '#6B6B6B', textTransform: 'capitalize' },
+  badgeValidada:  { display: 'inline-block', padding: '2px 7px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, background: '#E8F5E9', color: '#2E7D32', textTransform: 'capitalize' },
   motivoTexto:    { fontSize: '0.6rem', color: '#B8860B', marginTop: '2px', lineHeight: 1.2, whiteSpace: 'normal', maxWidth: '100%' },
 
   trMarcada:    { background: '#E3F2FD', borderLeft: '3px solid #1565C0' },

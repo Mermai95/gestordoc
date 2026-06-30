@@ -63,7 +63,7 @@ export default function Facturas() {
   if (!cliente) return <p style={{ color: '#6B6B6B' }}>Cargando…</p>
 
   const validadas  = facturas.filter(f => f.estado === 'validada')
-  const pendientes = facturas.filter(f => f.estado === 'pendiente' || f.estado === 'revisar')
+  const pendientes = facturas.filter(f => f.estado === 'pendiente' || f.estado === 'revisar' || f.estado === 'procesada')
   const errores    = facturas.filter(f => f.estado === 'error')
   const filtradas  = filtroEstado ? facturas.filter(f => f.estado === filtroEstado) : facturas
 

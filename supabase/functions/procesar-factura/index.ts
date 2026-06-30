@@ -18,7 +18,10 @@ INSTRUCCIONES CRÍTICAS:
 5. Si es ABONO o RECTIFICATIVA (importes negativos, dice "abono", "nota de crédito", "rectificativa"), pon tipo "abono" e importes en negativo.
 6. El campo "deducible" = igual que "cuota_iva" salvo que indique explícitamente que no es deducible.
 7. Si la página está en blanco o no es una factura, responde: {"es_factura": false}
-8. Si ves que la factura indica "Página X de Y" o "Pág. X/Y" o similar, incluye en "notas": "Página X de Y — puede necesitar unirse con otras páginas".
+8. IMPORTANTE sobre paginación:
+   - Si ves "Página X de Y" pero la factura está COMPLETA en esta página (tiene totales, base imponible, IVA), entonces NO es página múltiple — es simplemente su posición dentro de un lote de facturas. No pongas advertencia.
+   - Solo marca "posible_pagina_multiple": true si hay evidencia real de que la factura CONTINÚA en otra página: falta de totales, falta de base imponible/IVA, texto cortado, "continúa en la siguiente página", mismo número de factura sin resumen final.
+   - En caso de duda, marca "posible_pagina_multiple": true para que el contable lo revise.
 9. Si no ves claramente una fecha, deja el campo como string vacío "", NUNCA escribas texto como "sin fecha visible", "ilegible", "no visible" o similar en campos de fecha.
 
 FORMATOS ESPECIALES DE IVA:
@@ -38,6 +41,11 @@ NIF DEL EXPEDIDOR — REGLA CRÍTICA:
 - Si ves dos NIFs en la factura, el del EMISOR es el que está en la cabecera junto al nombre del proveedor. El otro es del receptor — ignóralo para este campo.
 - Si no podés determinar con certeza cuál es el del emisor, pon confianza "baja" y explícalo en notas.
 
+DATOS DEL RECEPTOR (CLIENTE):
+- Buscá en el bloque de la DERECHA o inferior de la factura donde dice "Datos del cliente", "Receptor", "Destinatario", "Facturado a", etc.
+- Extraé: receptor_nombre (razón social), receptor_email (si aparece), receptor_telefono (si aparece).
+- Si no ves email o teléfono del receptor, dejá el campo como string vacío "".
+
 RESPONDE SOLO CON ESTE JSON (sin texto, sin backticks):
 {
   "num_factura": "número exacto",
@@ -46,12 +54,16 @@ RESPONDE SOLO CON ESTE JSON (sin texto, sin backticks):
   "concepto": "Su fra. nº [num_factura] — [nombre expedidor corto]",
   "nif_expedidor": "NIF o CIF sin espacios",
   "expedidor": "nombre completo del emisor",
+  "receptor_nombre": "nombre o razón social del receptor",
+  "receptor_email": "email del receptor o vacío",
+  "receptor_telefono": "teléfono del receptor o vacío",
   "tipo": "factura o abono",
   "base_imponible": 0.00,
   "pct_iva": "21,0",
   "cuota_iva": 0.00,
   "deducible": 0.00,
   "confianza": "alta|media|baja",
+  "posible_pagina_multiple": false,
   "notas": "observaciones relevantes o vacío",
   "lineas_extra": [
     { "base_imponible": 0.00, "pct_iva": "10,0", "cuota_iva": 0.00, "deducible": 0.00 }
@@ -65,6 +77,9 @@ EJEMPLO REAL — Makro con 3 tipos de IVA:
   "concepto": "Su fra. nº 2500002982 — MAKRO",
   "nif_expedidor": "A28206493",
   "expedidor": "MAKRO AUTOSERVICIO MAYORISTA SA",
+  "receptor_nombre": "MYSTYLE MYLOVE LUCKY 2022 S.L.",
+  "receptor_email": "",
+  "receptor_telefono": "",
   "tipo": "factura",
   "base_imponible": 214.16,
   "pct_iva": "21,0",
@@ -86,13 +101,132 @@ EJEMPLO — Factura abono/rectificativa:
   "pct_iva": "21,0",
   "cuota_iva": -31.50,
   "deducible": -31.50,
+  "receptor_nombre": "",
+  "receptor_email": "",
+  "receptor_telefono": "",
   "confianza": "alta",
   "lineas_extra": []
 }`
 
+// ─── MEMORIA ACTIVA ───────────────────────────────────────────────────────────
+
+interface MemoriaProveedor {
+  nif_expedidor: string
+  nombre_proveedor: string | null
+  tipo_iva_habitual: string | null
+  tiene_recargo_equivalencia: boolean
+  notas_extraccion: string | null
+  total_facturas: number
+  facturas_corregidas: number
+  tasa_error: number
+}
+
+// Busca en memoria_proveedores por NIF
+async function consultarMemoria(
+  supabaseAdmin: any,
+  nifExpedidor: string
+): Promise<MemoriaProveedor | null> {
+  if (!nifExpedidor || nifExpedidor.length < 5) return null
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('memoria_proveedores')
+      .select('*')
+      .eq('nif_expedidor', nifExpedidor.replace(/\s/g, '').toUpperCase())
+      .single()
+
+    if (error || !data) return null
+    return data as MemoriaProveedor
+  } catch {
+    return null
+  }
+}
+
+// Construye el bloque de contexto que se inyecta en el PROMPT
+function buildMemoriaContext(memoria: MemoriaProveedor): string {
+  const lineas: string[] = [
+    '=== MEMORIA DE PROVEEDOR (aprendizaje previo) ===',
+    `Este proveedor (${memoria.nif_expedidor}) fue procesado ${memoria.total_facturas} veces.`,
+  ]
+
+  if (memoria.nombre_proveedor) {
+    lineas.push(`Nombre habitual confirmado: ${memoria.nombre_proveedor}`)
+  }
+  if (memoria.tipo_iva_habitual !== null) {
+    lineas.push(`IVA habitual de este proveedor: ${memoria.tipo_iva_habitual}% — úsalo si no ves el tipo claramente`)
+  }
+  if (memoria.tiene_recargo_equivalencia) {
+    lineas.push('ATENCIÓN: Este proveedor aplica recargo de equivalencia — buscarlo aunque no sea obvio')
+  }
+  if (memoria.tasa_error > 20) {
+    lineas.push(
+      `PRECAUCIÓN: Tasa de corrección histórica ${memoria.tasa_error}% — extremar cuidado, marcar confianza "media" como mínimo`
+    )
+  }
+  if (memoria.notas_extraccion) {
+    lineas.push(`Instrucciones específicas para este proveedor: ${memoria.notas_extraccion}`)
+  }
+  lineas.push('=== FIN MEMORIA ===')
+
+  return '\n\n' + lineas.join('\n')
+}
+
+// Crea o incrementa el registro en memoria_proveedores tras procesar una factura
+async function actualizarContadorMemoria(
+  supabaseAdmin: any,
+  nifExpedidor: string,
+  nombreExpedidor: string
+): Promise<void> {
+  if (!nifExpedidor || nifExpedidor.length < 5) return
+
+  try {
+    const nifNorm = nifExpedidor.replace(/\s/g, '').toUpperCase()
+
+    const { data: existente } = await supabaseAdmin
+      .from('memoria_proveedores')
+      .select('id, total_facturas, nombre_proveedor')
+      .eq('nif_expedidor', nifNorm)
+      .single()
+
+    if (existente) {
+      await supabaseAdmin
+        .from('memoria_proveedores')
+        .update({
+          total_facturas: existente.total_facturas + 1,
+          ultima_factura_at: new Date().toISOString(),
+          // Actualiza nombre si antes estaba vacío
+          ...(nombreExpedidor && !existente.nombre_proveedor
+            ? { nombre_proveedor: nombreExpedidor }
+            : {}),
+        })
+        .eq('nif_expedidor', nifNorm)
+    } else {
+      await supabaseAdmin.from('memoria_proveedores').insert({
+        nif_expedidor: nifNorm,
+        nombre_proveedor: nombreExpedidor || null,
+        total_facturas: 1,
+        ultima_factura_at: new Date().toISOString(),
+      })
+    }
+  } catch (e) {
+    // No crítico — no interrumpe el flujo principal
+    console.error('Error actualizando memoria:', e)
+  }
+}
+
+// ─── HAIKU ────────────────────────────────────────────────────────────────────
+
 // Llama a Claude Haiku con una página individual
-async function procesarPagina(base64: string, mediaType: string, anthropicKey: string): Promise<any> {
+// memoriaExtra: bloque de contexto de memoria, se añade al final del PROMPT si existe
+async function procesarPagina(
+  base64: string,
+  mediaType: string,
+  anthropicKey: string,
+  memoriaExtra = ''
+): Promise<any> {
   const isPdf = mediaType === 'application/pdf'
+  const promptFinal = memoriaExtra ? PROMPT + memoriaExtra : PROMPT
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -110,7 +244,7 @@ async function procesarPagina(base64: string, mediaType: string, anthropicKey: s
             type: isPdf ? 'document' : 'image',
             source: { type: 'base64', media_type: mediaType, data: base64 },
           },
-          { type: 'text', text: PROMPT },
+          { type: 'text', text: promptFinal },
         ],
       }],
     }),
@@ -120,6 +254,8 @@ async function procesarPagina(base64: string, mediaType: string, anthropicKey: s
   const limpio = texto.replace(/```json|```/g, '').trim()
   return JSON.parse(limpio)
 }
+
+// ─── AGENTE ───────────────────────────────────────────────────────────────────
 
 // AGENTE: valida que el NIF leído no sea el del propio cliente receptor
 async function validarNifExpedidor(
@@ -150,6 +286,8 @@ async function validarNifExpedidor(
   return { valido: true, motivo: '' }
 }
 
+// ─── STORAGE ──────────────────────────────────────────────────────────────────
+
 // Sube un PDF a Supabase Storage y devuelve la ruta
 async function subirStorage(supabaseAdmin: any, bytes: Uint8Array, nombre: string): Promise<string | null> {
   try {
@@ -164,6 +302,8 @@ async function subirStorage(supabaseAdmin: any, bytes: Uint8Array, nombre: strin
     return null
   }
 }
+
+// ─── PROCESAR UNA PÁGINA ──────────────────────────────────────────────────────
 
 // Procesa UNA página completa: extraer + subir a storage + IA. Nunca lanza error hacia afuera.
 async function procesarUnaPagina(
@@ -187,27 +327,49 @@ async function procesarUnaPagina(
     const binary = paginaBytes.reduce((acc, b) => acc + String.fromCharCode(b), '')
     const base64 = btoa(binary)
 
-    const parsed = await procesarPagina(base64, 'application/pdf', anthropicKey)
+    // ── MEMORIA ACTIVA: primer intento sin NIF (lo necesitamos para buscar en memoria) ──
+    // Hacemos una extracción inicial para obtener el NIF del expedidor,
+    // luego buscamos su memoria y re-inyectamos contexto si existe.
+    const parsedInicial = await procesarPagina(base64, 'application/pdf', anthropicKey)
 
-    if (parsed?.es_factura === false) return null
+    if (parsedInicial?.es_factura === false) return null
 
-    if (numPages > 1 && parsed.notas !== undefined) {
-      const notaPagina = `Página ${indice + 1} de ${numPages}`
-      parsed.notas = parsed.notas
-        ? `${notaPagina} — ${parsed.notas}`
-        : notaPagina
+    // Buscar memoria del proveedor con el NIF detectado
+    const nifDetectado = parsedInicial?.nif_expedidor || ''
+    const memoria = await consultarMemoria(supabaseAdmin, nifDetectado)
+
+    let parsed = parsedInicial
+
+    // Si hay memoria con notas específicas o alta tasa de error → re-procesar con contexto
+    if (memoria && (memoria.notas_extraccion || memoria.tasa_error > 15)) {
+      const memoriaContext = buildMemoriaContext(memoria)
+      const parsedConMemoria = await procesarPagina(base64, 'application/pdf', anthropicKey, memoriaContext)
+      if (parsedConMemoria && parsedConMemoria?.es_factura !== false) {
+        parsed = parsedConMemoria
+        parsed.memoria_aplicada = true
+      }
+    } else if (memoria) {
+      // Hay memoria básica (solo contador) — anotar que existía pero no se reprocessó
+      parsed.memoria_aplicada = false
+    }
+
+    if (parsed.posible_pagina_multiple === undefined) {
+      parsed.posible_pagina_multiple = false
     }
 
     if (archivoUrl) parsed.archivo_url = archivoUrl
 
     // AGENTE: validar NIF expedidor vs cliente receptor
-   const validacionNif = await validarNifExpedidor(supabaseAdmin, parsed.nif_expedidor, clienteId)
+    const validacionNif = await validarNifExpedidor(supabaseAdmin, parsed.nif_expedidor, clienteId)
 
     if (!validacionNif.valido) {
       parsed.estado = 'revisar'
       parsed.motivo_revision = validacionNif.motivo
       parsed.confianza = 'baja'
       parsed.nif_expedidor = ''
+
+      // Actualizar contador en memoria igualmente (la factura existe)
+      actualizarContadorMemoria(supabaseAdmin, nifDetectado, parsed.expedidor || '').catch(console.error)
       return parsed
     }
 
@@ -222,6 +384,9 @@ async function procesarUnaPagina(
       parsed.motivo_revision = 'Confianza baja — ' + (parsed.notas || 'verificar manualmente')
     }
 
+    // Actualizar contador en memoria (no bloquea el flujo)
+    actualizarContadorMemoria(supabaseAdmin, parsed.nif_expedidor, parsed.expedidor || '').catch(console.error)
+
     return parsed
 
   } catch (err) {
@@ -230,7 +395,9 @@ async function procesarUnaPagina(
   }
 }
 
-// ── NUEVO: junta las partes subidas a Storage y reconstruye el PDF completo ──
+// ─── JUNTAR PARTES ────────────────────────────────────────────────────────────
+
+// Junta las partes subidas a Storage y reconstruye el PDF completo
 async function juntarPartes(supabaseAdmin: any, idLote: string, totalPartes: number): Promise<Uint8Array> {
   let base64Completo = ''
 
@@ -246,7 +413,7 @@ async function juntarPartes(supabaseAdmin: any, idLote: string, totalPartes: num
     base64Completo += texto
   }
 
-  // Limpieza: borrar las partes temporales una vez juntadas (no son necesarias después)
+  // Borrar las partes temporales una vez juntadas
   const rutasABorrar = []
   for (let i = 1; i <= totalPartes; i++) {
     rutasABorrar.push(`temp/${idLote}_parte${i}.txt`)
@@ -260,6 +427,8 @@ async function juntarPartes(supabaseAdmin: any, idLote: string, totalPartes: num
   }
   return bytes
 }
+
+// ─── SERVE ────────────────────────────────────────────────────────────────────
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -288,18 +457,16 @@ serve(async (req) => {
     let esMultipagina = false
     let clienteIdGlobal: string | null = null
 
-    // ── Path n8n NUEVO: JSON con id_lote + total_partes (PDF ya subido en pedazos a Storage) ──
+    // ── Path n8n: JSON con id_lote + total_partes (PDF ya subido en pedazos a Storage) ──
     if (contentType.includes('application/json')) {
       const body = await req.json()
 
       if (body.id_lote && body.total_partes) {
-        // Flujo de lotes: juntar las partes que n8n subió previamente a Storage
         pdfBytes = await juntarPartes(supabaseAdmin, body.id_lote, body.total_partes)
         esMultipagina = true
         clienteIdGlobal = body.cliente_id || null
 
       } else if (body.pdf_base64) {
-        // Compatibilidad con el flujo viejo (PDF chico, base64 directo en el JSON)
         const binaryStr = atob(body.pdf_base64)
         pdfBytes = new Uint8Array(binaryStr.length)
         for (let i = 0; i < binaryStr.length; i++) {

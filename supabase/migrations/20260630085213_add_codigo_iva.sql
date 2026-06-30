@@ -1,0 +1,1 @@
+ALTER TABLE facturas ADD COLUMN IF NOT EXISTS codigo_iva INTEGER;
